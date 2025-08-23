@@ -1,36 +1,44 @@
 import streamlit as st
-import openai
+from groq import Groq
 
-# --- Setup your OpenAI key ---
-openai.api_key = "YOUR_OPENAI_API_KEY"  # replace with your key
+# ---------------- SETUP ----------------
+st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="centered")
 
-st.set_page_config(page_title="IndiBot", page_icon="🤖")
+# 🔑 Paste your Groq API key here
+client = Groq(api_key="PASTE-YOUR-GROQ-API-KEY-HERE")
+
+# ---------------- HEADER ----------------
 st.title("🤖 IndiBot")
-st.write("Now powered with AI (OpenAI GPT)!")
+st.write("A smart chatbot built with **Streamlit** and **Groq**.")
 
-# Store chat history
+# ---------------- CHAT HISTORY ----------------
 if "messages" not in st.session_state:
-    st.session_state["messages"] = []
+    st.session_state["messages"] = [
+        {"role": "system", "content": "You are IndiBot, a helpful assistant."}
+    ]
 
-# User input
-user_input = st.chat_input("Ask me anything...")
+# ---------------- USER INPUT ----------------
+user_input = st.chat_input("Say something...")
 
 if user_input:
-    # Save user input
+    # Save user message
     st.session_state["messages"].append({"role": "user", "content": user_input})
 
-    # Send to GPT model
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",   # you can use "gpt-4" if available
+    # Call Groq model (example: mixtral-8x7b-32768)
+    response = client.chat.completions.create(
+        model="mixtral-8x7b-32768",  # or "llama2-70b-4096"
         messages=st.session_state["messages"]
     )
 
-    bot_reply = response["choices"][0]["message"]["content"]
+    # Get bot reply
+    bot_reply = response.choices[0].message.content
+
+    # Save bot reply
     st.session_state["messages"].append({"role": "assistant", "content": bot_reply})
 
-# Display messages
-for msg in st.session_state["messages"]:
+# ---------------- DISPLAY CHAT ----------------
+for msg in st.session_state["messages"][1:]:  # skip system message
     if msg["role"] == "user":
         st.markdown(f"🧑 **You:** {msg['content']}")
-    else:
+    elif msg["role"] == "assistant":
         st.markdown(f"🤖 **IndiBot:** {msg['content']}")
