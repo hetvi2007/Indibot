@@ -1,51 +1,36 @@
 import streamlit as st
+import openai
 
-# --- Basic ChatBot Class ---
-class ChatBot:
-    def __init__(self, name="IndiBot"):
-        self.name = name
+# --- Setup your OpenAI key ---
+openai.api_key = "YOUR_OPENAI_API_KEY"  # replace with your key
 
-    def get_response(self, user_input):
-        # Very simple rule-based responses
-        user_input = user_input.lower()
-
-        if "hello" in user_input or "hi" in user_input:
-            return "Hello 👋! How can I help you today?"
-        elif "your name" in user_input:
-            return f"My name is {self.name} 🤖"
-        elif "bye" in user_input:
-            return "Goodbye! Have a great day 🌸"
-        else:
-            return "I’m still learning... can you rephrase that?"
-
-# --- Streamlit UI ---
 st.set_page_config(page_title="IndiBot", page_icon="🤖")
-
 st.title("🤖 IndiBot")
-st.write("A simple chatbot built with Streamlit and Python.")
+st.write("Now powered with AI (OpenAI GPT)!")
 
-# Initialize bot
-bot = ChatBot()
-
-# Store conversation in session_state
+# Store chat history
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
 
-# Chat input
-user_input = st.chat_input("Say something...")
+# User input
+user_input = st.chat_input("Ask me anything...")
 
 if user_input:
-    # Store user message
+    # Save user input
     st.session_state["messages"].append({"role": "user", "content": user_input})
 
-    # Get bot response
-    response = bot.get_response(user_input)
-    st.session_state["messages"].append({"role": "bot", "content": response})
+    # Send to GPT model
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",   # you can use "gpt-4" if available
+        messages=st.session_state["messages"]
+    )
 
-# Display chat history
+    bot_reply = response["choices"][0]["message"]["content"]
+    st.session_state["messages"].append({"role": "assistant", "content": bot_reply})
+
+# Display messages
 for msg in st.session_state["messages"]:
     if msg["role"] == "user":
         st.markdown(f"🧑 **You:** {msg['content']}")
     else:
-        st.markdown(f"🤖 **{bot.name}:** {msg['content']}")
-
+        st.markdown(f"🤖 **IndiBot:** {msg['content']}")
