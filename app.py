@@ -1,44 +1,48 @@
 import streamlit as st
 from groq import Groq
 
-# ---------------- SETUP ----------------
-st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="centered")
+# Load API key from Streamlit Secrets
+api_key = st.secrets["GROQ_API_KEY"]
 
-# 🔑 Paste your Groq API key here
-client = Groq(api_key="PASTE-YOUR-GROQ-API-KEY-HERE")
+# Initialize Groq client
+client = Groq(api_key=api_key)
 
-# ---------------- HEADER ----------------
-st.title("🤖 IndiBot")
-st.write("A smart chatbot built with **Streamlit** and **Groq**.")
+# Streamlit app
+st.set_page_config(page_title="Groq Chatbot 🚀", page_icon="🤖")
+st.title("🤖 Groq Chatbot")
 
-# ---------------- CHAT HISTORY ----------------
+# Session state for chat history
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [
-        {"role": "system", "content": "You are IndiBot, a helpful assistant."}
+    st.session_state.messages = [
+        {"role": "system", "content": "You are a helpful AI assistant."}
     ]
 
-# ---------------- USER INPUT ----------------
-user_input = st.chat_input("Say something...")
-
-if user_input:
-    # Save user message
-    st.session_state["messages"].append({"role": "user", "content": user_input})
-
-    # Call Groq model (example: mixtral-8x7b-32768)
-    response = client.chat.completions.create(
-        model="mixtral-8x7b-32768",  # or "llama2-70b-4096"
-        messages=st.session_state["messages"]
-    )
-
-    # Get bot reply
-    bot_reply = response.choices[0].message.content
-
-    # Save bot reply
-    st.session_state["messages"].append({"role": "assistant", "content": bot_reply})
-
-# ---------------- DISPLAY CHAT ----------------
-for msg in st.session_state["messages"][1:]:  # skip system message
+# Show chat history
+for msg in st.session_state.messages:
     if msg["role"] == "user":
-        st.markdown(f"🧑 **You:** {msg['content']}")
+        st.chat_message("user").write(msg["content"])
     elif msg["role"] == "assistant":
-        st.markdown(f"🤖 **IndiBot:** {msg['content']}")
+        st.chat_message("assistant").write(msg["content"])
+
+# Input box (new Streamlit chat_input)
+if user_input := st.chat_input("Type your message..."):
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.chat_message("user").write(user_input)
+
+    try:
+        # Call Groq API
+        response = client.chat.completions.create(
+            model="mixtral-8x7b-32768",   # You can change to other Groq models
+            messages=st.session_state.messages
+        )
+
+        reply = response.choices[0].message.content
+
+        # Add assistant reply
+        st.session_state.messages.append({"role": "assistant", "content": reply})
+        st.chat_message("assistant").write(reply)
+
+    except Exception as e:
+        st.error(f"Error: {e}")
+
