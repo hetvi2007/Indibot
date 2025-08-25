@@ -25,11 +25,12 @@ if user_input:
 
     # Call Groq API
     response = client.chat.completions.create(
-        model="llama3-8b-8192",  # Example model, you can change to another
+        model="llama3-8b-8192",   # You can change this model if needed
         messages=st.session_state["messages"]
     )
 
-    bot_reply = response.choices[0].message["content"]
+    # ✅ FIXED: Correct way to get reply
+    bot_reply = response.choices[0].message.content
 
     # Add bot reply
     st.session_state["messages"].append({"role": "assistant", "content": bot_reply})
