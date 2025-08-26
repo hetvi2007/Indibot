@@ -1,132 +1,87 @@
 import streamlit as st
-from groq import Groq
-import json
-import os
-import requests
+import datetime
+import pyperclip  # for copy-to-clipboard (install with `pip install pyperclip`)
 
-# -------------------- PAGE CONFIG --------------------
-st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="centered")
+# ---------------- Session State Setup ----------------
+if "chats" not in st.session_state:
+    st.session_state.chats = {}
+if "archived_chats" not in st.session_state:
+    st.session_state.archived_chats = {}
+if "active_chat" not in st.session_state:
+    st.session_state.active_chat = None
+if "chat_counter" not in st.session_state:
+    st.session_state.chat_counter = 0
 
-# -------------------- LOAD API KEY --------------------
-API_KEY = st.secrets["GROQ_API_KEY"]
-client = Groq(api_key=API_KEY)
+# ---------------- Helper Functions ----------------
+def create_new_chat():
+    st.session_state.chat_counter += 1
+    chat_id = f"chat_{st.session_state.chat_counter}"
+    st.session_state.chats[chat_id] = {
+        "title": f"Untitled {st.session_state.chat_counter}",
+        "messages": [],
+        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    st.session_state.active_chat = chat_id
 
-# -------------------- HISTORY STORAGE --------------------
-HISTORY_FILE = "chat_history.json"
+def rename_chat(chat_id, new_title):
+    st.session_state.chats[chat_id]["title"] = new_title
 
-def load_history():
-    if os.path.exists(HISTORY_FILE):
-        with open(HISTORY_FILE, "r") as f:
-            return json.load(f)
-    return []
+def delete_chat(chat_id):
+    if chat_id in st.session_state.chats:
+        del st.session_state.chats[chat_id]
+        if st.session_state.active_chat == chat_id:
+            st.session_state.active_chat = None
 
-def save_history(history):
-    with open(HISTORY_FILE, "w") as f:
-        json.dump(history, f, indent=2)
+def archive_chat(chat_id):
+    st.session_state.archived_chats[chat_id] = st.session_state.chats.pop(chat_id)
 
-# -------------------- SESSION STATE --------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+def share_chat(chat_id):
+    chat = st.session_state.chats[chat_id]
+    content = f"Chat: {chat['title']}\n\n"
+    for msg in chat["messages"]:
+        content += f"{msg['role'].capitalize()}: {msg['content']}\n"
+    st.download_button("⬇️ Download Chat", content, file_name=f"{chat['title']}.txt")
 
-if "all_chats" not in st.session_state:
-    st.session_state.all_chats = load_history()
+# ---------------- Sidebar ----------------
+st.sidebar.title("💬 Chat Manager")
 
-if "current_chat_index" not in st.session_state:
-    st.session_state.current_chat_index = None
-
-# -------------------- SIDEBAR --------------------
-st.sidebar.header("⚙️ Options")
-
-# New Chat
+# New Chat Button
 if st.sidebar.button("➕ New Chat"):
-    if st.session_state.messages:
-        st.session_state.all_chats.append(st.session_state.messages)
-        save_history(st.session_state.all_chats)
-    st.session_state.messages = []
-    st.session_state.current_chat_index = None
-    st.rerun()
+    create_new_chat()
 
 # Search Chats
-search_query = st.sidebar.text_input("🔍 Search in chat history")
-if search_query:
-    st.sidebar.subheader("Search Results")
-    for idx, chat in enumerate(st.session_state.all_chats):
-        for msg in chat:
-            if search_query.lower() in msg["content"].lower():
-                st.sidebar.write(f"📝 Chat {idx+1}: {msg['role'].capitalize()} → {msg['content'][:50]}...")
+search_query = st.sidebar.text_input("🔍 Search chats")
 
-# View Past Chats
-st.sidebar.subheader("📂 Past Chats")
-if st.session_state.all_chats:
-    for i, chat in enumerate(st.session_state.all_chats):
-        col1, col2 = st.sidebar.columns([4,1])
-        with col1:
-            if st.sidebar.button(f"Open Chat {i+1}", key=f"open_{i}"):
-                st.session_state.messages = chat.copy()
-                st.session_state.current_chat_index = i
-                st.rerun()
-        with col2:
-            if st.sidebar.button("❌", key=f"delete_{i}"):
-                del st.session_state.all_chats[i]
-                save_history(st.session_state.all_chats)
-                st.session_state.messages = []
-                st.session_state.current_chat_index = None
-                st.rerun()
+# Active Chats Section
+st.sidebar.subheader("Active Chats")
+for chat_id, chat in list(st.session_state.chats.items()):
+    if search_query.lower() in chat["title"].lower():
+        with st.sidebar.expander(chat["title"], expanded=False):
+            if st.button("Open", key=f"open_{chat_id}"):
+                st.session_state.active_chat = chat_id
+            new_title = st.text_input("Rename", chat["title"], key=f"rename_{chat_id}")
+            if new_title != chat["title"]:
+                rename_chat(chat_id, new_title)
+            if st.button("🗑️ Delete", key=f"delete_{chat_id}"):
+                delete_chat(chat_id)
+                st.experimental_rerun()
+            if st.button("📦 Archive", key=f"archive_{chat_id}"):
+                archive_chat(chat_id)
+                st.experimental_rerun()
+            share_chat(chat_id)
 
-# -------------------- MAIN TITLE --------------------
-st.title("🤖 IndiBot")
-st.write("A chatbot with **Groq AI + Image Generation** 🚀")
+# Archived Chats Section
+if st.session_state.archived_chats:
+    st.sidebar.subheader("📦 Archived")
+    for chat_id, chat in st.session_state.archived_chats.items():
+        with st.sidebar.expander(chat["title"], expanded=False):
+            if st.button("Restore", key=f"restore_{chat_id}"):
+                st.session_state.chats[chat_id] = st.session_state.archived_chats.pop(chat_id)
+                st.experimental_rerun()
 
-# -------------------- DISPLAY CHAT --------------------
-for message in st.session_state.messages:
-    with st.chat_message("user" if message["role"] == "user" else "assistant"):
-        if message.get("type") == "image":
-            st.image(message["content"], caption="Generated Image")
-        else:
-            st.markdown(message["content"])
-
-# -------------------- USER INPUT --------------------
-if user_input := st.chat_input("Say something..."):
-    # Handle Image Requests
-    if user_input.startswith("/image"):
-        prompt = user_input.replace("/image", "").strip()
-        st.session_state.messages.append({"role": "user", "content": user_input})
-
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        with st.chat_message("assistant"):
-            with st.spinner("🎨 Generating image..."):
-                # Example: using Dummy placeholder image generator (replace with real API)
-                image_url = f"https://dummyimage.com/600x400/000/fff.png&text={prompt.replace(' ','+')}"
-                st.image(image_url, caption=prompt)
-
-        st.session_state.messages.append({"role": "assistant", "content": image_url, "type": "image"})
-
-    else:
-        # Normal Text Chat
-        st.session_state.messages.append({"role": "user", "content": user_input})
-
-        with st.chat_message("user"):
-            st.markdown(user_input)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = client.chat.completions.create(
-                    model="llama3-8b-8192",
-                    messages=st.session_state.messages,
-                    temperature=0.4,
-                )
-                bot_reply = response.choices[0].message.content
-                st.markdown(bot_reply)
-
-        st.session_state.messages.append({"role": "assistant", "content": bot_reply})
-
-    # Update history
-    if st.session_state.current_chat_index is not None:
-        st.session_state.all_chats[st.session_state.current_chat_index] = st.session_state.messages
-    else:
-        if st.session_state.messages not in st.session_state.all_chats:
-            st.session_state.all_chats.append(st.session_state.messages)
-
-    save_history(st.session_state.all_chats)
+# ---------------- Main Area ----------------
+if st.session_state.active_chat:
+    st.write(f"### Active Chat: {st.session_state.chats[st.session_state.active_chat]['title']}")
+    st.write("💬 Messages will appear here later...")
+else:
+    st.write("👉 Select or create a chat from the sidebar.")
