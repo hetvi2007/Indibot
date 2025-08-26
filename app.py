@@ -1,116 +1,123 @@
 import streamlit as st
-import json
-import os
+import json, os, uuid
 from datetime import datetime
 from pathlib import Path
+from contextlib import contextmanager
 
-# -----------------------
-# Storage
-# -----------------------
+st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="wide")
+
+# ---------------- Storage ----------------
 CHAT_FILE = "chats.json"
 
-def load_chats():
+def load_store():
     if Path(CHAT_FILE).exists():
-        with open(CHAT_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(CHAT_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
     return {"active": {}, "archived": {}}
 
-def save_chats(data):
+def save_store(store):
     with open(CHAT_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+        json.dump(store, f, indent=2)
 
-# -----------------------
-# Initialize session
-# -----------------------
-if "chats" not in st.session_state:
-    st.session_state.chats = load_chats()
-if "current_chat" not in st.session_state:
-    st.session_state.current_chat = None
+store = st.session_state.setdefault("store", load_store())
+current_id = st.session_state.setdefault("current_id", None)
 
-# -----------------------
-# Sidebar
-# -----------------------
-st.sidebar.title("⚙️ Options")
-
-# New Chat button
-if st.sidebar.button("✍️ New Chat"):
-    new_id = str(datetime.now().timestamp())
-    st.session_state.chats["active"][new_id] = {
+# ---------------- Helpers ----------------
+def new_chat():
+    cid = uuid.uuid4().hex[:8]
+    store["active"][cid] = {
         "title": "New Chat",
+        "created_at": datetime.now().isoformat(timespec="seconds"),
         "messages": []
     }
-    st.session_state.current_chat = new_id
-    save_chats(st.session_state.chats)
+    st.session_state.current_id = cid
+    save_store(store); st.rerun()
 
-# Search
-search_query = st.sidebar.text_input("🔍 Search in chat history")
+def open_chat(cid):
+    st.session_state.current_id = cid
+    st.rerun()
 
-# Library (Archived)
-with st.sidebar.expander("🗂️ Library"):
-    for cid, chat in st.session_state.chats["archived"].items():
-        st.write(chat["title"])
+def delete_chat(cid, archived=False):
+    bucket = "archived" if archived else "active"
+    store[bucket].pop(cid, None)
+    if st.session_state.current_id == cid and not archived:
+        st.session_state.current_id = None
+    save_store(store); st.rerun()
 
-# -----------------------
-# Active Chats list
-# -----------------------
-st.sidebar.subheader("Chats")
-for cid, chat in st.session_state.chats["active"].items():
-    cols = st.sidebar.columns([6, 1])
-    if cols[0].button(chat["title"], key=f"chat_{cid}"):
-        st.session_state.current_chat = cid
+def archive_chat(cid):
+    store["archived"][cid] = store["active"].pop(cid)
+    if st.session_state.current_id == cid:
+        st.session_state.current_id = None
+    save_store(store); st.rerun()
 
-    # 3-dots menu
-    with cols[1].popout():
-        action = st.radio(
-            "⋮",
-            ["-", "Rename", "Delete", "Share", "Archive"],
-            label_visibility="collapsed",
-            key=f"action_{cid}"
-        )
-        if action == "Rename":
-            new_name = st.text_input("Rename chat:", value=chat["title"], key=f"rename_{cid}")
-            if st.button("Save", key=f"save_{cid}"):
-                st.session_state.chats["active"][cid]["title"] = new_name
-                save_chats(st.session_state.chats)
-                st.rerun()
-        elif action == "Delete":
-            del st.session_state.chats["active"][cid]
-            save_chats(st.session_state.chats)
-            st.rerun()
-        elif action == "Share":
-            st.code(json.dumps(chat, indent=2))  # simple copy
-        elif action == "Archive":
-            st.session_state.chats["archived"][cid] = chat
-            del st.session_state.chats["active"][cid]
-            save_chats(st.session_state.chats)
-            st.rerun()
+def restore_chat(cid):
+    store["active"][cid] = store["archived"].pop(cid)
+    save_store(store); st.rerun()
 
-# -----------------------
-# Main Chat Window
-# -----------------------
-st.title("🤖 IndiBot")
+def rename_chat(cid, new_title, archived=False):
+    bucket = "archived" if archived else "active"
+    store[bucket][cid]["title"] = new_title.strip() or store[bucket][cid]["title"]
+    save_store(store); st.rerun()
 
-if st.session_state.current_chat:
-    chat = st.session_state.chats["active"].get(st.session_state.current_chat)
-    if chat:
-        for msg in chat["messages"]:
-            st.write(f"**{msg['role']}**: {msg['content']}")
+def export_text(cid, archived=False):
+    bucket = "archived" if archived else "active"
+    chat = store[bucket][cid]
+    lines = [f"Title: {chat['title']}", f"Created: {chat['created_at']}", "-"*40]
+    for m in chat["messages"]:
+        lines.append(f"{m['role'].capitalize()}: {m['content']}")
+    return "\n".join(lines)
 
-        # Input box
-        user_input = st.chat_input("Say something...")
-        if user_input:
-            # Save user msg
-            chat["messages"].append({"role": "You", "content": user_input})
-            # Bot reply (dummy for now)
-            bot_reply = f"Echo: {user_input}"
-            chat["messages"].append({"role": "Bot", "content": bot_reply})
+def autotitle_if_needed(cid):
+    chat = store["active"][cid]
+    if chat["title"] == "New Chat":
+        for m in chat["messages"]:
+            if m["role"] == "user":
+                chat["title"] = (m["content"].strip() or "Untitled")[:40]
+                break
+        save_store(store)
 
-            # Auto title from first user msg
-            if chat["title"] == "New Chat" and len(chat["messages"]) > 0:
-                chat["title"] = chat["messages"][0]["content"][:20]
+@contextmanager
+def dotmenu(label="⋮"):
+    # Use popover if available; fall back to expander on older Streamlit
+    if hasattr(st, "popover"):
+        with st.popover(label):
+            yield
+    else:
+        with st.expander(label):
+            yield
 
-            save_chats(st.session_state.chats)
-            st.rerun()
-else:
-    st.info("Start a new chat from the sidebar.")
+# ---------------- Sidebar ----------------
+with st.sidebar:
+    st.header("Options")
+    st.button("✍️ New chat", on_click=new_chat, use_container_width=True)
 
+    q = st.text_input("🔍 Search chats", placeholder="Search by title or message…")
+
+    # Search results (from ACTIVE chats)
+    if q:
+        qlow = q.lower()
+        st.caption("Search Results")
+        found = []
+        for cid, chat in store["active"].items():
+            hay_title = qlow in chat["title"].lower()
+            hay_msg = any(qlow in m["content"].lower() for m in chat["messages"])
+            if hay_title or hay_msg:
+                found.append(cid)
+
+        if not found:
+            st.write("No matches.")
+        else:
+            for cid in found:
+                title = store["active"][cid]["title"]
+                if st.button(f"📝 {title}", key=f"sr_{cid}", use_container_width=True):
+                    open_chat(cid)
+
+    st.markdown("---")
+    st.subheader("Chats")
+
+    # Active chats list with 3-dots menu
+    if not store["active"]:
+        st
