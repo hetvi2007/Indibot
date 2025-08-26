@@ -1,6 +1,6 @@
 import streamlit as st
 import datetime
-import pyperclip  # for copy-to-clipboard (install with `pip install pyperclip`)
+import uuid
 
 # ---------------- Session State Setup ----------------
 if "chats" not in st.session_state:
@@ -9,15 +9,12 @@ if "archived_chats" not in st.session_state:
     st.session_state.archived_chats = {}
 if "active_chat" not in st.session_state:
     st.session_state.active_chat = None
-if "chat_counter" not in st.session_state:
-    st.session_state.chat_counter = 0
 
 # ---------------- Helper Functions ----------------
 def create_new_chat():
-    st.session_state.chat_counter += 1
-    chat_id = f"chat_{st.session_state.chat_counter}"
+    chat_id = str(uuid.uuid4())[:8]
     st.session_state.chats[chat_id] = {
-        "title": f"Untitled {st.session_state.chat_counter}",
+        "title": "Untitled",
         "messages": [],
         "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
@@ -34,16 +31,11 @@ def delete_chat(chat_id):
 
 def archive_chat(chat_id):
     st.session_state.archived_chats[chat_id] = st.session_state.chats.pop(chat_id)
-
-def share_chat(chat_id):
-    chat = st.session_state.chats[chat_id]
-    content = f"Chat: {chat['title']}\n\n"
-    for msg in chat["messages"]:
-        content += f"{msg['role'].capitalize()}: {msg['content']}\n"
-    st.download_button("⬇️ Download Chat", content, file_name=f"{chat['title']}.txt")
+    if st.session_state.active_chat == chat_id:
+        st.session_state.active_chat = None
 
 # ---------------- Sidebar ----------------
-st.sidebar.title("💬 Chat Manager")
+st.sidebar.title("💬 Chats")
 
 # New Chat Button
 if st.sidebar.button("➕ New Chat"):
@@ -52,14 +44,14 @@ if st.sidebar.button("➕ New Chat"):
 # Search Chats
 search_query = st.sidebar.text_input("🔍 Search chats")
 
-# Active Chats Section
-st.sidebar.subheader("Active Chats")
+# Active Chats List
 for chat_id, chat in list(st.session_state.chats.items()):
     if search_query.lower() in chat["title"].lower():
-        with st.sidebar.expander(chat["title"], expanded=False):
-            if st.button("Open", key=f"open_{chat_id}"):
-                st.session_state.active_chat = chat_id
-            new_title = st.text_input("Rename", chat["title"], key=f"rename_{chat_id}")
+        cols = st.sidebar.columns([5,1])
+        if cols[0].button(chat["title"], key=f"open_{chat_id}"):
+            st.session_state.active_chat = chat_id
+        with cols[1].expander("⋮"):
+            new_title = st.text_input("✏️ Rename", chat["title"], key=f"rename_{chat_id}")
             if new_title != chat["title"]:
                 rename_chat(chat_id, new_title)
             if st.button("🗑️ Delete", key=f"delete_{chat_id}"):
@@ -68,20 +60,16 @@ for chat_id, chat in list(st.session_state.chats.items()):
             if st.button("📦 Archive", key=f"archive_{chat_id}"):
                 archive_chat(chat_id)
                 st.experimental_rerun()
-            share_chat(chat_id)
 
-# Archived Chats Section
+# Archived Section
 if st.session_state.archived_chats:
     st.sidebar.subheader("📦 Archived")
     for chat_id, chat in st.session_state.archived_chats.items():
-        with st.sidebar.expander(chat["title"], expanded=False):
-            if st.button("Restore", key=f"restore_{chat_id}"):
-                st.session_state.chats[chat_id] = st.session_state.archived_chats.pop(chat_id)
-                st.experimental_rerun()
+        if st.sidebar.button(chat["title"], key=f"arch_{chat_id}"):
+            st.session_state.active_chat = chat_id
 
 # ---------------- Main Area ----------------
 if st.session_state.active_chat:
     st.write(f"### Active Chat: {st.session_state.chats[st.session_state.active_chat]['title']}")
-    st.write("💬 Messages will appear here later...")
 else:
     st.write("👉 Select or create a chat from the sidebar.")
