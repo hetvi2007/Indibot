@@ -81,7 +81,6 @@ def autotitle_if_needed(cid):
 
 @contextmanager
 def dotmenu(label="⋮"):
-    # Use popover if available; fall back to expander on older Streamlit
     if hasattr(st, "popover"):
         with st.popover(label):
             yield
@@ -94,30 +93,13 @@ with st.sidebar:
     st.header("Options")
     st.button("✍️ New chat", on_click=new_chat, use_container_width=True)
 
-    q = st.text_input("🔍 Search chats", placeholder="Search by title or message…")
-
-    # Search results (from ACTIVE chats)
-    if q:
-        qlow = q.lower()
-        st.caption("Search Results")
-        found = []
-        for cid, chat in store["active"].items():
-            hay_title = qlow in chat["title"].lower()
-            hay_msg = any(qlow in m["content"].lower() for m in chat["messages"])
-            if hay_title or hay_msg:
-                found.append(cid)
-
-        if not found:
-            st.write("No matches.")
-        else:
-            for cid in found:
-                title = store["active"][cid]["title"]
-                if st.button(f"📝 {title}", key=f"sr_{cid}", use_container_width=True):
-                    open_chat(cid)
-
     st.markdown("---")
     st.subheader("Chats")
 
-    # Active chats list with 3-dots menu
     if not store["active"]:
-        st
+        st.caption("No chats yet. Start one!")
+    else:
+        for cid, chat in list(store["active"].items()):
+            c1, c2 = st.columns([0.85, 0.15])
+            if c1.button(chat["title"], key=f"open_{cid}", use_container_width=True):
+                open_chat(ci_
