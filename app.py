@@ -1,85 +1,148 @@
 import streamlit as st
-import json
-import os
+from datetime import datetime
+import uuid
 
-# File where chats are stored
-CHAT_FILE = "chats.json"
+# ---------- Page ----------
+st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="wide")
 
-# Load chats
-def load_chats():
-    if os.path.exists(CHAT_FILE):
-        with open(CHAT_FILE, "r") as f:
-            return json.load(f)
-    return []
+# ---------- Session Store (no files, in-memory only) ----------
+store = st.session_state.setdefault("store", {"active": {}, "archived": {}})
+current_id = st.session_state.setdefault("current_id", None)
 
-# Save chats
-def save_chats(chats):
-    with open(CHAT_FILE, "w") as f:
-        json.dump(chats, f, indent=2)
+def rerun():
+    try:
+        st.rerun()
+    except Exception:
+        st.experimental_rerun()
 
-# Sidebar layout
-def sidebar():
-    st.sidebar.title("Options")
+# ---------- Helpers ----------
+def new_chat():
+    cid = uuid.uuid4().hex[:8]
+    store["active"][cid] = {
+        "title": "New Chat",
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "messages": []
+    }
+    st.session_state.current_id = cid
+    rerun()
 
-    # Load existing chats
-    chats = load_chats()
+def open_chat(cid):
+    st.session_state.current_id = cid
+    rerun()
 
-    # New chat button
-    if st.sidebar.button("➕ New Chat"):
-        new_chat = {"id": len(chats) + 1, "title": f"Chat {len(chats) + 1}", "messages": []}
-        chats.append(new_chat)
-        save_chats(chats)
-        st.session_state.active_chat = new_chat["id"]
+def rename_chat(cid, new_title, bucket="active"):
+    if new_title.strip():
+        store[bucket][cid]["title"] = new_title.strip()
+    rerun()
 
-    # Show chat list
-    st.sidebar.subheader("Past Chats")
-    for chat in chats:
-        with st.sidebar.expander(chat["title"], expanded=False):
-            if st.button("Open", key=f"open_{chat['id']}"):
-                st.session_state.active_chat = chat["id"]
+def delete_chat(cid, bucket="active"):
+    store[bucket].pop(cid, None)
+    if bucket == "active" and st.session_state.current_id == cid:
+        st.session_state.current_id = None
+    rerun()
 
-            if st.button("Rename", key=f"rename_{chat['id']}"):
-                new_title = st.text_input("New title:", key=f"title_{chat['id']}")
-                if new_title:
-                    chat["title"] = new_title
-                    save_chats(chats)
+def archive_chat(cid):
+    store["archived"][cid] = store["active"].pop(cid)
+    if st.session_state.current_id == cid:
+        st.session_state.current_id = None
+    rerun()
 
-            if st.button("🗑 Delete", key=f"delete_{chat['id']}"):
-                chats = [c for c in chats if c["id"] != chat["id"]]
-                save_chats(chats)
-                st.rerun()
+def restore_chat(cid):
+    store["active"][cid] = store["archived"].pop(cid)
+    rerun()
 
-            if st.button("📦 Archive", key=f"archive_{chat['id']}"):
-                chat["archived"] = True
-                save_chats(chats)
+def export_text(cid, bucket="active"):
+    chat = store[bucket][cid]
+    lines = [f"Title: {chat['title']}", f"Created: {chat['created_at']}", "-"*40]
+    for m in chat["messages"]:
+        lines.append(f"{m['role'].capitalize()}: {m['content']}")
+    return "\n".join(lines)
 
-            if st.button("📤 Share", key=f"share_{chat['id']}"):
-                st.code(json.dumps(chat, indent=2), language="json")
+def autotitle_if_needed(cid):
+    chat = store["active"][cid]
+    if chat["title"] == "New Chat":
+        for m in chat["messages"]:
+            if m["role"] == "user" and m["content"].strip():
+                chat["title"] = m["content"].strip()[:40]
+                break
 
-    return chats
+# ---------- Sidebar ----------
+with st.sidebar:
+    st.header("Options")
+    st.button("✍️ New chat", use_container_width=True, on_click=new_chat)
 
-# Main app
-def main():
-    st.title("🤖 IndiBot")
-    st.write("A simple chatbot built with Streamlit + Groq API.")
+    st.markdown("---")
+    st.subheader("Chats")
 
-    chats = sidebar()
+    # Active chats
+    if not store["active"]:
+        st.caption("No chats yet. Start one!")
+    else:
+        # show newest first
+        for cid, chat in list(store["active"].items())[::-1]:
+            c1, c2 = st.columns([0.8, 0.2])
+            if c1.button(chat["title"] or "Untitled", key=f"open_{cid}", use_container_width=True):
+                open_chat(cid)
+            with c2:
+                # Simple 3-dots menu as an expander (works on all Streamlit versions)
+                with st.expander("⋮"):
+                    new_name = st.text_input("Rename", value=chat["title"], key=f"rn_{cid}")
+                    if st.button("Save name", key=f"rns_{cid}"):
+                        rename_chat(cid, new_name, bucket="active")
+                    st.download_button(
+                        "⬇️ Download (.txt)",
+                        data=export_text(cid, bucket="active"),
+                        file_name=f"{(chat['title'] or 'chat')}.txt",
+                        key=f"dl_{cid}",
+                        use_container_width=True,
+                    )
+                    if st.button("📦 Archive", key=f"arc_{cid}"):
+                        archive_chat(cid)
+                    if st.button("🗑️ Delete", key=f"del_{cid}"):
+                        delete_chat(cid, bucket="active")
 
-    # Find active chat
-    active_chat_id = st.session_state.get("active_chat")
-    active_chat = next((c for c in chats if c["id"] == active_chat_id), None)
+    # Archived chats
+    if store["archived"]:
+        with st.expander("🗂️ Library"):
+            for cid, chat in list(store["archived"].items())[::-1]:
+                c1, c2 = st.columns([0.8, 0.2])
+                c1.write(f"📄 {chat['title'] or 'Untitled'}")
+                with c2:
+                    with st.expander("⋮"):
+                        new_name = st.text_input("Rename", value=chat["title"], key=f"arn_{cid}")
+                        if st.button("Save name", key=f"arns_{cid}"):
+                            rename_chat(cid, new_name, bucket="archived")
+                        st.download_button(
+                            "⬇️ Download (.txt)",
+                            data=export_text(cid, bucket="archived"),
+                            file_name=f"{(chat['title'] or 'chat')}.txt",
+                            key=f"adl_{cid}",
+                            use_container_width=True,
+                        )
+                        if st.button("↩️ Restore", key=f"res_{cid}"):
+                            restore_chat(cid)
+                        if st.button("🗑️ Delete", key=f"adel_{cid}"):
+                            delete_chat(cid, bucket="archived")
 
-    if active_chat:
-        st.subheader(f"Chat: {active_chat['title']}")
-        for msg in active_chat["messages"]:
-            st.write(msg)
+# ---------- Main area ----------
+st.title("🤖 IndiBot")
 
-        user_input = st.chat_input("Say something...")
-        if user_input:
-            active_chat["messages"].append(f"You: {user_input}")
-            active_chat["messages"].append(f"Bot: [reply to '{user_input}']")
-            save_chats(chats)
-            st.rerun()
+if current_id and current_id in store["active"]:
+    chat = store["active"][current_id]
 
-if __name__ == "__main__":
-    main()
+    # show messages
+    for m in chat["messages"]:
+        with st.chat_message("user" if m["role"] == "user" else "assistant"):
+            st.write(m["content"])
+
+    # input
+    text = st.chat_input("Say something…")
+    if text:
+        chat["messages"].append({"role": "user", "content": text})
+        # simple echo for now; replace with Groq later
+        reply = f"Echo: {text}"
+        chat["messages"].append({"role": "assistant", "content": reply})
+        autotitle_if_needed(current_id)
+        rerun()
+else:
+    st.info("Start a new chat from the sidebar.")
