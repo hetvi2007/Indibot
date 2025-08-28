@@ -73,12 +73,11 @@ with st.sidebar:
         st.caption("No chats yet. Start one!")
     else:
         for cid, chat in list(store["active"].items())[::-1]:
-            col1, col2 = st.columns([0.85, 0.15])
-            with col1:
-                if st.button(chat["title"] or "Untitled", key=f"open_{cid}", use_container_width=True):
-                    open_chat(cid)
-            with col2:
-                with st.popover("⋮"):  # ✅ inline 3-dots
+            c1, c2 = st.columns([0.8, 0.2])
+            if c1.button(chat["title"] or "Untitled", key=f"open_{cid}", use_container_width=True):
+                open_chat(cid)
+            with c2:
+                with st.popover("⋮"):  # ✅ cleaner 3-dots menu
                     new_name = st.text_input("Rename", value=chat["title"], key=f"rn_{cid}")
                     if st.button("💾 Save name", key=f"rns_{cid}"):
                         rename_chat(cid, new_name, bucket="active")
@@ -98,10 +97,9 @@ with st.sidebar:
     if store["archived"]:
         with st.expander("🗂️ Library"):
             for cid, chat in list(store["archived"].items())[::-1]:
-                col1, col2 = st.columns([0.85, 0.15])
-                with col1:
-                    st.write(f"📄 {chat['title'] or 'Untitled'}")
-                with col2:
+                c1, c2 = st.columns([0.8, 0.2])
+                c1.write(f"📄 {chat['title'] or 'Untitled'}")
+                with c2:
                     with st.popover("⋮"):
                         new_name = st.text_input("Rename", value=chat["title"], key=f"arn_{cid}")
                         if st.button("💾 Save name", key=f"arns_{cid}"):
