@@ -5,15 +5,9 @@ import uuid
 # ---------- Page ----------
 st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="wide")
 
-# ---------- Session Store (no files, in-memory only) ----------
+# ---------- Session Store ----------
 store = st.session_state.setdefault("store", {"active": {}, "archived": {}})
 current_id = st.session_state.setdefault("current_id", None)
-
-def rerun():
-    try:
-        st.rerun()
-    except Exception:
-        st.experimental_rerun()
 
 # ---------- Helpers ----------
 def new_chat():
@@ -24,32 +18,32 @@ def new_chat():
         "messages": []
     }
     st.session_state.current_id = cid
-    rerun()
+    st.experimental_rerun()
 
 def open_chat(cid):
     st.session_state.current_id = cid
-    rerun()
+    st.experimental_rerun()
 
 def rename_chat(cid, new_title, bucket="active"):
     if new_title.strip():
         store[bucket][cid]["title"] = new_title.strip()
-    rerun()
+    st.experimental_rerun()
 
 def delete_chat(cid, bucket="active"):
     store[bucket].pop(cid, None)
     if bucket == "active" and st.session_state.current_id == cid:
         st.session_state.current_id = None
-    rerun()
+    st.experimental_rerun()
 
 def archive_chat(cid):
     store["archived"][cid] = store["active"].pop(cid)
     if st.session_state.current_id == cid:
         st.session_state.current_id = None
-    rerun()
+    st.experimental_rerun()
 
 def restore_chat(cid):
     store["active"][cid] = store["archived"].pop(cid)
-    rerun()
+    st.experimental_rerun()
 
 def export_text(cid, bucket="active"):
     chat = store[bucket][cid]
@@ -78,16 +72,14 @@ with st.sidebar:
     if not store["active"]:
         st.caption("No chats yet. Start one!")
     else:
-        # show newest first
         for cid, chat in list(store["active"].items())[::-1]:
             c1, c2 = st.columns([0.8, 0.2])
             if c1.button(chat["title"] or "Untitled", key=f"open_{cid}", use_container_width=True):
                 open_chat(cid)
             with c2:
-                # Simple 3-dots menu as an expander (works on all Streamlit versions)
-                with st.expander("⋮"):
+                with st.popover("⋮"):  # ✅ cleaner 3-dots menu
                     new_name = st.text_input("Rename", value=chat["title"], key=f"rn_{cid}")
-                    if st.button("Save name", key=f"rns_{cid}"):
+                    if st.button("💾 Save name", key=f"rns_{cid}"):
                         rename_chat(cid, new_name, bucket="active")
                     st.download_button(
                         "⬇️ Download (.txt)",
@@ -108,9 +100,9 @@ with st.sidebar:
                 c1, c2 = st.columns([0.8, 0.2])
                 c1.write(f"📄 {chat['title'] or 'Untitled'}")
                 with c2:
-                    with st.expander("⋮"):
+                    with st.popover("⋮"):
                         new_name = st.text_input("Rename", value=chat["title"], key=f"arn_{cid}")
-                        if st.button("Save name", key=f"arns_{cid}"):
+                        if st.button("💾 Save name", key=f"arns_{cid}"):
                             rename_chat(cid, new_name, bucket="archived")
                         st.download_button(
                             "⬇️ Download (.txt)",
@@ -139,10 +131,9 @@ if current_id and current_id in store["active"]:
     text = st.chat_input("Say something…")
     if text:
         chat["messages"].append({"role": "user", "content": text})
-        # simple echo for now; replace with Groq later
-        reply = f"Echo: {text}"
+        reply = f"Echo: {text}"  # later replace with Groq API
         chat["messages"].append({"role": "assistant", "content": reply})
         autotitle_if_needed(current_id)
-        rerun()
+        st.experimental_rerun()
 else:
     st.info("Start a new chat from the sidebar.")
