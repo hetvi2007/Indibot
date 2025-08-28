@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit as st 
 from datetime import datetime
 import uuid
 
@@ -18,32 +18,32 @@ def new_chat():
         "messages": []
     }
     st.session_state.current_id = cid
-    st.experimental_rerun()
+    st.rerun()
 
 def open_chat(cid):
     st.session_state.current_id = cid
-    st.experimental_rerun()
+    st.rerun()
 
 def rename_chat(cid, new_title, bucket="active"):
     if new_title.strip():
         store[bucket][cid]["title"] = new_title.strip()
-    st.experimental_rerun()
+    st.rerun()
 
 def delete_chat(cid, bucket="active"):
     store[bucket].pop(cid, None)
     if bucket == "active" and st.session_state.current_id == cid:
         st.session_state.current_id = None
-    st.experimental_rerun()
+    st.rerun()
 
 def archive_chat(cid):
     store["archived"][cid] = store["active"].pop(cid)
     if st.session_state.current_id == cid:
         st.session_state.current_id = None
-    st.experimental_rerun()
+    st.rerun()
 
 def restore_chat(cid):
     store["active"][cid] = store["archived"].pop(cid)
-    st.experimental_rerun()
+    st.rerun()
 
 def export_text(cid, bucket="active"):
     chat = store[bucket][cid]
@@ -134,6 +134,6 @@ if current_id and current_id in store["active"]:
         reply = f"Echo: {text}"  # later replace with Groq API
         chat["messages"].append({"role": "assistant", "content": reply})
         autotitle_if_needed(current_id)
-        st.experimental_rerun()
+        st.rerun()
 else:
     st.info("Start a new chat from the sidebar.")
