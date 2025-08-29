@@ -1,30 +1,17 @@
-import os
-import json
-import uuid
+import streamlit as st 
 from datetime import datetime
-import streamlit as st
+import uuid
+import os
 from groq import Groq
-
-# ---------- Config ----------
-st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
 
 # ---------- Groq Client ----------
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# ---------- History Storage ----------
-STORE_FILE = "mehnitavi_store.json"
+# ---------- Page ----------
+st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="wide")
 
-def load_store():
-    if os.path.exists(STORE_FILE):
-        with open(STORE_FILE, "r") as f:
-            return json.load(f)
-    return {"active": {}, "archived": {}}
-
-def save_store():
-    with open(STORE_FILE, "w") as f:
-        json.dump(store, f)
-
-store = st.session_state.setdefault("store", load_store())
+# ---------- Session Store ----------
+store = st.session_state.setdefault("store", {"active": {}, "archived": {}})
 current_id = st.session_state.setdefault("current_id", None)
 
 # ---------- Helpers ----------
@@ -36,44 +23,38 @@ def new_chat():
         "messages": []
     }
     st.session_state.current_id = cid
-    save_store()
-    st.rerun()
+    st.experimental_rerun()
 
 def open_chat(cid):
     st.session_state.current_id = cid
-    st.rerun()
+    st.experimental_rerun()
 
 def rename_chat(cid, new_title, bucket="active"):
     if new_title.strip():
         store[bucket][cid]["title"] = new_title.strip()
-        save_store()
-    st.rerun()
+    st.experimental_rerun()
 
 def delete_chat(cid, bucket="active"):
     store[bucket].pop(cid, None)
     if bucket == "active" and st.session_state.current_id == cid:
         st.session_state.current_id = None
-    save_store()
-    st.rerun()
+    st.experimental_rerun()
 
 def archive_chat(cid):
     store["archived"][cid] = store["active"].pop(cid)
     if st.session_state.current_id == cid:
         st.session_state.current_id = None
-    save_store()
-    st.rerun()
+    st.experimental_rerun()
 
 def restore_chat(cid):
     store["active"][cid] = store["archived"].pop(cid)
-    save_store()
-    st.rerun()
+    st.experimental_rerun()
 
 def export_text(cid, bucket="active"):
     chat = store[bucket][cid]
     lines = [f"Title: {chat['title']}", f"Created: {chat['created_at']}", "-"*40]
     for m in chat["messages"]:
-        role = "Mehnitavi" if m["role"] == "assistant" else "User"
-        lines.append(f"{role}: {m['content']}")
+        lines.append(f"{m['role'].capitalize()}: {m['content']}")
     return "\n".join(lines)
 
 def autotitle_if_needed(cid):
@@ -83,7 +64,6 @@ def autotitle_if_needed(cid):
             if m["role"] == "user" and m["content"].strip():
                 chat["title"] = m["content"].strip()[:40]
                 break
-        save_store()
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -109,7 +89,7 @@ with st.sidebar:
                     st.download_button(
                         "⬇️ Download (.txt)",
                         data=export_text(cid, bucket="active"),
-                        file_name=f"{(chat['title'] or 'Mehnitavi_chat')}.txt",
+                        file_name=f"{(chat['title'] or 'chat')}.txt",
                         key=f"dl_{cid}",
                         use_container_width=True,
                     )
@@ -132,7 +112,7 @@ with st.sidebar:
                         st.download_button(
                             "⬇️ Download (.txt)",
                             data=export_text(cid, bucket="archived"),
-                            file_name=f"{(chat['title'] or 'Mehnitavi_chat')}.txt",
+                            file_name=f"{(chat['title'] or 'chat')}.txt",
                             key=f"adl_{cid}",
                             use_container_width=True,
                         )
@@ -156,21 +136,19 @@ if current_id and current_id in store["active"]:
     text = st.chat_input("Say something…")
     if text:
         chat["messages"].append({"role": "user", "content": text})
-        with st.chat_message("user"):
-            st.write(text)
 
-        # Use Groq API for assistant reply
+        # --- Groq API call ---
         with st.chat_message("assistant"):
             response = client.chat.completions.create(
-                model="llama3-8b-8192",  # ✅ you can change to another Groq-supported model
-                messages=chat["messages"],
+                model="llama3-8b-8192",  # ✅ Groq-supported model
+                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}] 
+                         + chat["messages"],
             )
             reply = response.choices[0].message.content
             st.write(reply)
 
         chat["messages"].append({"role": "assistant", "content": reply})
         autotitle_if_needed(current_id)
-        save_store()
-        st.rerun()
+        st.experimental_rerun()
 else:
     st.info("Start a new chat from the sidebar.")
