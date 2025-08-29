@@ -49,7 +49,8 @@ def export_text(cid, bucket="active"):
     chat = store[bucket][cid]
     lines = [f"Title: {chat['title']}", f"Created: {chat['created_at']}", "-"*40]
     for m in chat["messages"]:
-        lines.append(f"{m['role'].capitalize()}: {m['content']}")
+        role = "You" if m["role"] == "user" else "Mehnitavi"
+        lines.append(f"{role}: {m['content']}")
     return "\n".join(lines)
 
 def autotitle_if_needed(cid):
@@ -124,15 +125,22 @@ if current_id and current_id in store["active"]:
 
     # show messages
     for m in chat["messages"]:
-        with st.chat_message("user" if m["role"] == "user" else "assistant"):
-            st.write(m["content"])
+        if m["role"] == "user":
+            with st.chat_message("user", avatar="🧑"):
+                st.write(m["content"])
+        else:
+            with st.chat_message("assistant", avatar="🦾"):
+                st.write(m["content"])
 
     # input
     text = st.chat_input("Say something…")
     if text:
         chat["messages"].append({"role": "user", "content": text})
-        reply = f"Echo: {text}"  # later replace with Groq API
+
+        # Mehnitavi reply
+        reply = f"Mehnitavi: {text}"
         chat["messages"].append({"role": "assistant", "content": reply})
+
         autotitle_if_needed(current_id)
         st.rerun()
 else:
