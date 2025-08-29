@@ -1,25 +1,27 @@
-import streamlit as st 
+import streamlit as st
 from datetime import datetime
 import uuid
-import json, os
+import json
+import os
+from openai import OpenAI
 
-# ---------- File Persistence ----------
-STORE_FILE = "mehnitavi_store.json"
+# ---------- Setup ----------
+st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
 
+DATA_FILE = "mehnitavi_store.json"
+client = OpenAI()  # requires OPENAI_API_KEY in your environment
+
+# ---------- Load / Save ----------
 def load_store():
-    if os.path.exists(STORE_FILE):
-        with open(STORE_FILE, "r") as f:
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     return {"active": {}, "archived": {}}
 
 def save_store():
-    with open(STORE_FILE, "w") as f:
-        json.dump(store, f)
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(store, f, ensure_ascii=False, indent=2)
 
-# ---------- Page ----------
-st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
-
-# ---------- Session Store ----------
 store = st.session_state.setdefault("store", load_store())
 current_id = st.session_state.setdefault("current_id", None)
 
@@ -33,43 +35,46 @@ def new_chat():
     }
     st.session_state.current_id = cid
     save_store()
-    st.session_state.refresh = True
+    st.experimental_rerun()
 
 def open_chat(cid):
     st.session_state.current_id = cid
-    st.session_state.refresh = True
+    st.experimental_rerun()
 
 def rename_chat(cid, new_title, bucket="active"):
     if new_title.strip():
         store[bucket][cid]["title"] = new_title.strip()
     save_store()
-    st.session_state.refresh = True
+    st.experimental_rerun()
 
 def delete_chat(cid, bucket="active"):
     store[bucket].pop(cid, None)
     if bucket == "active" and st.session_state.current_id == cid:
         st.session_state.current_id = None
     save_store()
-    st.session_state.refresh = True
+    st.experimental_rerun()
 
 def archive_chat(cid):
     store["archived"][cid] = store["active"].pop(cid)
     if st.session_state.current_id == cid:
         st.session_state.current_id = None
     save_store()
-    st.session_state.refresh = True
+    st.experimental_rerun()
 
 def restore_chat(cid):
     store["active"][cid] = store["archived"].pop(cid)
     save_store()
-    st.session_state.refresh = True
+    st.experimental_rerun()
 
 def export_text(cid, bucket="active"):
     chat = store[bucket][cid]
-    lines = [f"Title: {chat['title']}", f"Created: {chat['created_at']}", "-"*40]
+    lines = [
+        f"Title: {chat['title']}",
+        f"Created: {chat['created_at']}",
+        "-"*40
+    ]
     for m in chat["messages"]:
-        role = "You" if m["role"] == "user" else "Mehnitavi"
-        lines.append(f"{role}: {m['content']}")
+        lines.append(f"{m['role'].capitalize()}: {m['content']}")
     return "\n".join(lines)
 
 def autotitle_if_needed(cid):
@@ -80,7 +85,6 @@ def autotitle_if_needed(cid):
                 chat["title"] = m["content"].strip()[:40]
                 break
     save_store()
-    st.session_state.refresh = True
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -99,7 +103,7 @@ with st.sidebar:
             if c1.button(chat["title"] or "Untitled", key=f"open_{cid}", use_container_width=True):
                 open_chat(cid)
             with c2:
-                with st.popover("⋮"):  # ✅ cleaner 3-dots menu
+                with st.popover("⋮"):
                     new_name = st.text_input("Rename", value=chat["title"], key=f"rn_{cid}")
                     if st.button("💾 Save name", key=f"rns_{cid}"):
                         rename_chat(cid, new_name, bucket="active")
@@ -146,29 +150,28 @@ if current_id and current_id in store["active"]:
 
     # show messages
     for m in chat["messages"]:
-        if m["role"] == "user":
-            with st.chat_message("user", avatar="🧑"):
-                st.write(m["content"])
-        else:
-            with st.chat_message("assistant", avatar="🦾"):
-                st.write(m["content"])
+        with st.chat_message("user" if m["role"] == "user" else "assistant"):
+            st.write(m["content"])
 
     # input
     text = st.chat_input("Say something…")
     if text:
         chat["messages"].append({"role": "user", "content": text})
+        with st.chat_message("user"):
+            st.write(text)
 
-        # Mehnitavi reply (no "Mehnitavi:" prefix inside the message)
-        reply = f"{text}"
+        # 🔥 call OpenAI instead of echoing
+        with st.chat_message("assistant"):
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",  # you can change model here
+                messages=[{"role": m["role"], "content": m["content"]} for m in chat["messages"]],
+            )
+            reply = response.choices[0].message.content
+            st.write(reply)
+
         chat["messages"].append({"role": "assistant", "content": reply})
-
         autotitle_if_needed(current_id)
         save_store()
-        st.session_state.refresh = True
+        st.experimental_rerun()
 else:
     st.info("Start a new chat from the sidebar.")
-
-# ---------- Handle Refresh ----------
-if st.session_state.get("refresh", False):
-    st.session_state.refresh = False
-    st.rerun()
