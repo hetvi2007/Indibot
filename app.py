@@ -33,36 +33,36 @@ def new_chat():
     }
     st.session_state.current_id = cid
     save_store()
-    st.rerun()
+    st.session_state.refresh = True
 
 def open_chat(cid):
     st.session_state.current_id = cid
-    st.rerun()
+    st.session_state.refresh = True
 
 def rename_chat(cid, new_title, bucket="active"):
     if new_title.strip():
         store[bucket][cid]["title"] = new_title.strip()
     save_store()
-    st.rerun()
+    st.session_state.refresh = True
 
 def delete_chat(cid, bucket="active"):
     store[bucket].pop(cid, None)
     if bucket == "active" and st.session_state.current_id == cid:
         st.session_state.current_id = None
     save_store()
-    st.rerun()
+    st.session_state.refresh = True
 
 def archive_chat(cid):
     store["archived"][cid] = store["active"].pop(cid)
     if st.session_state.current_id == cid:
         st.session_state.current_id = None
     save_store()
-    st.rerun()
+    st.session_state.refresh = True
 
 def restore_chat(cid):
     store["active"][cid] = store["archived"].pop(cid)
     save_store()
-    st.rerun()
+    st.session_state.refresh = True
 
 def export_text(cid, bucket="active"):
     chat = store[bucket][cid]
@@ -80,6 +80,7 @@ def autotitle_if_needed(cid):
                 chat["title"] = m["content"].strip()[:40]
                 break
     save_store()
+    st.session_state.refresh = True
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -163,6 +164,11 @@ if current_id and current_id in store["active"]:
 
         autotitle_if_needed(current_id)
         save_store()
-        st.rerun()
+        st.session_state.refresh = True
 else:
     st.info("Start a new chat from the sidebar.")
+
+# ---------- Handle Refresh ----------
+if st.session_state.get("refresh", False):
+    st.session_state.refresh = False
+    st.rerun()
