@@ -158,8 +158,8 @@ if current_id and current_id in store["active"]:
     if text:
         chat["messages"].append({"role": "user", "content": text})
 
-        # Mehnitavi reply
-        reply = f"Mehnitavi: {text}"
+        # Mehnitavi reply (no "Mehnitavi:" prefix inside the message)
+        reply = f"{text}"
         chat["messages"].append({"role": "assistant", "content": reply})
 
         autotitle_if_needed(current_id)
