@@ -1,14 +1,14 @@
-import streamlit as st 
+import streamlit as st
 from datetime import datetime
 import uuid
 import os
 from groq import Groq
 
-# ---------- Groq Client ----------
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-
-# ---------- Page ----------
+# ---------- Setup ----------
 st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="wide")
+
+# Initialize Groq client
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # ---------- Session Store ----------
 store = st.session_state.setdefault("store", {"active": {}, "archived": {}})
@@ -23,32 +23,26 @@ def new_chat():
         "messages": []
     }
     st.session_state.current_id = cid
-    st.experimental_rerun()
 
 def open_chat(cid):
     st.session_state.current_id = cid
-    st.experimental_rerun()
 
 def rename_chat(cid, new_title, bucket="active"):
     if new_title.strip():
         store[bucket][cid]["title"] = new_title.strip()
-    st.experimental_rerun()
 
 def delete_chat(cid, bucket="active"):
     store[bucket].pop(cid, None)
     if bucket == "active" and st.session_state.current_id == cid:
         st.session_state.current_id = None
-    st.experimental_rerun()
 
 def archive_chat(cid):
     store["archived"][cid] = store["active"].pop(cid)
     if st.session_state.current_id == cid:
         st.session_state.current_id = None
-    st.experimental_rerun()
 
 def restore_chat(cid):
     store["active"][cid] = store["archived"].pop(cid)
-    st.experimental_rerun()
 
 def export_text(cid, bucket="active"):
     chat = store[bucket][cid]
@@ -121,8 +115,8 @@ with st.sidebar:
                         if st.button("🗑️ Delete", key=f"adel_{cid}"):
                             delete_chat(cid, bucket="archived")
 
-# ---------- Main area ----------
-st.title("🤖 Mehnitavi")
+# ---------- Main Area ----------
+st.title("🤖 IndiBot (Mehnitavi)")
 
 if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
@@ -133,22 +127,26 @@ if current_id and current_id in store["active"]:
             st.write(m["content"])
 
     # input
-    text = st.chat_input("Say something…")
+    text = st.chat_input("Ask Mehnitavi something…")
     if text:
+        # save user msg
         chat["messages"].append({"role": "user", "content": text})
 
-        # --- Groq API call ---
-        with st.chat_message("assistant"):
+        # send to Groq
+        try:
             response = client.chat.completions.create(
-                model="llama3-8b-8192",  # ✅ Groq-supported model
-                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}] 
+                model="llama3-8b-8192",
+                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
                          + chat["messages"],
             )
             reply = response.choices[0].message.content
-            st.write(reply)
+        except Exception as e:
+            reply = f"⚠️ Error talking to Mehnitavi: {e}"
 
+        # save AI reply
         chat["messages"].append({"role": "assistant", "content": reply})
+
         autotitle_if_needed(current_id)
-        st.experimental_rerun()
+        st.rerun()
 else:
     st.info("Start a new chat from the sidebar.")
