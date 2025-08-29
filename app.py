@@ -1,12 +1,26 @@
 import streamlit as st 
 from datetime import datetime
 import uuid
+import json, os
+
+# ---------- File Persistence ----------
+STORE_FILE = "mehnitavi_store.json"
+
+def load_store():
+    if os.path.exists(STORE_FILE):
+        with open(STORE_FILE, "r") as f:
+            return json.load(f)
+    return {"active": {}, "archived": {}}
+
+def save_store():
+    with open(STORE_FILE, "w") as f:
+        json.dump(store, f)
 
 # ---------- Page ----------
-st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
 
 # ---------- Session Store ----------
-store = st.session_state.setdefault("store", {"active": {}, "archived": {}})
+store = st.session_state.setdefault("store", load_store())
 current_id = st.session_state.setdefault("current_id", None)
 
 # ---------- Helpers ----------
@@ -18,6 +32,7 @@ def new_chat():
         "messages": []
     }
     st.session_state.current_id = cid
+    save_store()
     st.rerun()
 
 def open_chat(cid):
@@ -27,22 +42,26 @@ def open_chat(cid):
 def rename_chat(cid, new_title, bucket="active"):
     if new_title.strip():
         store[bucket][cid]["title"] = new_title.strip()
+    save_store()
     st.rerun()
 
 def delete_chat(cid, bucket="active"):
     store[bucket].pop(cid, None)
     if bucket == "active" and st.session_state.current_id == cid:
         st.session_state.current_id = None
+    save_store()
     st.rerun()
 
 def archive_chat(cid):
     store["archived"][cid] = store["active"].pop(cid)
     if st.session_state.current_id == cid:
         st.session_state.current_id = None
+    save_store()
     st.rerun()
 
 def restore_chat(cid):
     store["active"][cid] = store["archived"].pop(cid)
+    save_store()
     st.rerun()
 
 def export_text(cid, bucket="active"):
@@ -60,6 +79,7 @@ def autotitle_if_needed(cid):
             if m["role"] == "user" and m["content"].strip():
                 chat["title"] = m["content"].strip()[:40]
                 break
+    save_store()
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -85,7 +105,7 @@ with st.sidebar:
                     st.download_button(
                         "⬇️ Download (.txt)",
                         data=export_text(cid, bucket="active"),
-                        file_name=f"{(chat['title'] or 'chat')}.txt",
+                        file_name=f"{(chat['title'] or 'Mehnitavi_chat')}.txt",
                         key=f"dl_{cid}",
                         use_container_width=True,
                     )
@@ -108,7 +128,7 @@ with st.sidebar:
                         st.download_button(
                             "⬇️ Download (.txt)",
                             data=export_text(cid, bucket="archived"),
-                            file_name=f"{(chat['title'] or 'chat')}.txt",
+                            file_name=f"{(chat['title'] or 'Mehnitavi_chat')}.txt",
                             key=f"adl_{cid}",
                             use_container_width=True,
                         )
@@ -118,7 +138,7 @@ with st.sidebar:
                             delete_chat(cid, bucket="archived")
 
 # ---------- Main area ----------
-st.title("🤖 IndiBot")
+st.title("🤖 Mehnitavi")
 
 if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
@@ -142,6 +162,7 @@ if current_id and current_id in store["active"]:
         chat["messages"].append({"role": "assistant", "content": reply})
 
         autotitle_if_needed(current_id)
+        save_store()
         st.rerun()
 else:
     st.info("Start a new chat from the sidebar.")
