@@ -2,6 +2,7 @@ import streamlit as st
 from datetime import datetime
 import uuid
 import os
+import re
 from groq import Groq
 
 # ---------- Setup ----------
@@ -58,6 +59,13 @@ def autotitle_if_needed(cid):
             if m["role"] == "user" and m["content"].strip():
                 chat["title"] = m["content"].strip()[:40]
                 break
+
+def highlight_text(text, term):
+    """Highlight search term in text."""
+    if not term:
+        return text
+    pattern = re.compile(re.escape(term), re.IGNORECASE)
+    return pattern.sub(lambda m: f"<mark>{m.group(0)}</mark>", text)
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -121,12 +129,101 @@ st.title("🤖 IndiBot (Mehnitavi)")
 if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
 
-    # show messages
-    for m in chat["messages"]:
-        with st.chat_message("user" if m["role"] == "user" else "assistant"):
-            st.write(m["content"])
+    # 🔹 Clear chat
+    if st.button("🧹 Clear all messages in this chat"):
+        chat["messages"] = []
+        st.rerun()
 
-    # input
+    # 🔎 Search messages
+    search_term = st.text_input("🔍 Search messages", key="search_box")
+    if search_term.strip():
+        filtered_messages = [
+            (idx, m) for idx, m in enumerate(chat["messages"])
+            if search_term.lower() in m["content"].lower()
+        ]
+        st.caption(f"Showing {len(filtered_messages)} result(s) for '{search_term}'")
+    else:
+        filtered_messages = list(enumerate(chat["messages"]))
+
+    # ---------- Show messages ----------
+    for idx, m in filtered_messages:
+        role = "user" if m["role"] == "user" else "assistant"
+        with st.chat_message(role):
+            # highlight content if searching
+            if search_term.strip():
+                highlighted = highlight_text(m["content"], search_term)
+                st.markdown(highlighted, unsafe_allow_html=True)
+            else:
+                st.write(m["content"])
+
+            c1, c2, c3, c4 = st.columns([0.2, 0.2, 0.2, 0.2])
+
+            # Edit
+            with c1:
+                if st.button("✏️ Edit", key=f"edit_{idx}"):
+                    st.session_state[f"editing_{idx}"] = True
+
+            # Copy
+            with c2:
+                copy_code = f"""
+                <script>
+                function copyToClipboard_{idx}() {{
+                    navigator.clipboard.writeText(`{m["content"]}`);
+                    alert("Copied to clipboard!");
+                }}
+                </script>
+                <button onclick="copyToClipboard_{idx}()">📋 Copy</button>
+                """
+                st.markdown(copy_code, unsafe_allow_html=True)
+
+            # Resend (only for user)
+            if role == "user":
+                with c3:
+                    if st.button("🔄 Resend", key=f"resend_{idx}"):
+                        st.session_state[f"editing_resend_{idx}"] = True
+
+            # Delete
+            with c4:
+                if st.button("🗑️ Delete", key=f"delete_{idx}"):
+                    chat["messages"].pop(idx)
+                    st.rerun()
+
+            # Edit mode
+            if st.session_state.get(f"editing_{idx}", False):
+                new_text = st.text_area("Edit message:", value=m["content"], key=f"editbox_{idx}")
+                if st.button("💾 Save", key=f"save_{idx}"):
+                    chat["messages"][idx]["content"] = new_text
+                    st.session_state[f"editing_{idx}"] = False
+                    st.rerun()
+
+            # Resend mode
+            if st.session_state.get(f"editing_resend_{idx}", False):
+                new_text = st.text_area("Edit & resend:", value=m["content"], key=f"editresendbox_{idx}")
+                if st.button("🚀 Resend", key=f"doresend_{idx}"):
+                    chat["messages"][idx]["content"] = new_text
+                    chat["messages"] = chat["messages"][: idx + 1]  # truncate after this msg
+
+                    # Ask Mehnitavi again
+                    try:
+                        response = client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
+                                     + chat["messages"],
+                        )
+                        reply = response.choices[0].message.content
+                    except Exception:
+                        response = client.chat.completions.create(
+                            model="llama-3.1-8b-instant",
+                            messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
+                                     + chat["messages"],
+                        )
+                        reply = response.choices[0].message.content
+
+                    chat["messages"].append({"role": "assistant", "content": reply})
+                    st.session_state[f"editing_resend_{idx}"] = False
+                    st.rerun()
+
+    # ---------- Input ----------
     text = st.chat_input("Ask Mehnitavi something…")
     if text:
         # save user msg
@@ -134,22 +231,19 @@ if current_id and current_id in store["active"]:
 
         # send to Groq
         try:
-            try:
-                response = client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",  # ✅ updated model
-                    messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
-                             + chat["messages"],
-                )
-            except Exception:
-                response = client.chat.completions.create(
-                    model="llama-3.1-8b-instant",  # ✅ fallback model
-                    messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
-                             + chat["messages"],
-                )
-
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
+                         + chat["messages"],
+            )
             reply = response.choices[0].message.content
-        except Exception as e:
-            reply = f"⚠️ Error talking to Mehnitavi: {e}"
+        except Exception:
+            response = client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
+                         + chat["messages"],
+            )
+            reply = response.choices[0].message.content
 
         # save AI reply
         chat["messages"].append({"role": "assistant", "content": reply})
