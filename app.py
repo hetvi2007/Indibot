@@ -134,11 +134,19 @@ if current_id and current_id in store["active"]:
 
         # send to Groq
         try:
-            response = client.chat.completions.create(
-                model="llama3-8b-8192",
-                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
-                         + chat["messages"],
-            )
+            try:
+                response = client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",  # ✅ updated model
+                    messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
+                             + chat["messages"],
+                )
+            except Exception:
+                response = client.chat.completions.create(
+                    model="llama-3.1-8b-instant",  # ✅ fallback model
+                    messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
+                             + chat["messages"],
+                )
+
             reply = response.choices[0].message.content
         except Exception as e:
             reply = f"⚠️ Error talking to Mehnitavi: {e}"
