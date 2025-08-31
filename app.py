@@ -87,3 +87,8 @@ if current_id and current_id in store["active"]:
         except Exception as e:
             reply = f"⚠️ Error talking to Mehnitavi: {e}"
         chat["messages"].append({"role": "assistant", "content": reply})
+        autotitle_if_needed(current_id)
+        st.rerun()
+
+else:
+    st.info("Start a new chat from the sidebar.")
