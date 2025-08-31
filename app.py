@@ -1,10 +1,8 @@
 import streamlit as st
-import streamlit.components.v1 as components
 from datetime import datetime
 import uuid
 import os
 from groq import Groq
-import base64
 
 # ---------- Setup ----------
 st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
@@ -51,42 +49,6 @@ with st.sidebar:
             if st.button(chat["title"] or "Untitled", key=f"open_{cid}", use_container_width=True):
                 open_chat(cid)
 
-# ---------- Mic Recorder ----------
-def mic_recorder():
-    html_code = """
-    <button onclick="startRecording()">🎤 Record</button>
-    <button onclick="stopRecording()">■ Stop</button>
-    <p id="status"></p>
-    <script>
-    let mediaRecorder;
-    let audioChunks = [];
-
-    async function startRecording() {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.start();
-        audioChunks = [];
-        mediaRecorder.ondataavailable = e => { audioChunks.push(e.data); };
-        document.getElementById("status").innerText = "Recording...";
-    }
-
-    function stopRecording() {
-        mediaRecorder.stop();
-        mediaRecorder.onstop = () => {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-            const reader = new FileReader();
-            reader.readAsDataURL(audioBlob);
-            reader.onloadend = () => {
-                const base64data = reader.result.split(',')[1];
-                window.parent.postMessage({ audio: base64data }, '*');
-            };
-        };
-        document.getElementById("status").innerText = "Stopped.";
-    }
-    </script>
-    """
-    components.html(html_code, height=150)
-
 # ---------- Main Area ----------
 st.title("🤖 Mehnitavi")
 
@@ -99,16 +61,18 @@ if current_id and current_id in store["active"]:
             st.write(m["content"])
 
     # --- Input system ---
-    col1, col2, col3 = st.columns([6,1,1])
+    text = st.chat_input("Ask Mehnitavi something…")
 
-    with col1:
-        text = st.chat_input("Ask Mehnitavi something…")
+    # File uploader (images, pdfs, text, audio)
+    uploaded_file = st.file_uploader(
+        "📎 Upload file (images, PDFs, text, or voice notes)", 
+        type=["png", "jpg", "jpeg", "pdf", "txt", "mp3", "wav"]
+    )
 
-    with col2:
-        st.file_uploader("📎", type=["png", "jpg", "jpeg", "pdf", "txt"], label_visibility="collapsed")
-
-    with col3:
-        mic_recorder()
+    if uploaded_file:
+        file_msg = f"📎 Uploaded file: {uploaded_file.name}"
+        chat["messages"].append({"role": "user", "content": file_msg})
+        st.success(f"File `{uploaded_file.name}` uploaded!")
 
     # --- Handle text input ---
     if text:
@@ -123,8 +87,3 @@ if current_id and current_id in store["active"]:
         except Exception as e:
             reply = f"⚠️ Error talking to Mehnitavi: {e}"
         chat["messages"].append({"role": "assistant", "content": reply})
-        autotitle_if_needed(current_id)
-        st.rerun()
-
-else:
-    st.info("Start a new chat from the sidebar.")
