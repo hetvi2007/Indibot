@@ -3,9 +3,13 @@ from datetime import datetime
 import uuid
 import os
 from groq import Groq
+from PIL import Image
+import base64
+import tempfile
+import io
 
 # ---------- Setup ----------
-st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
 
 # Initialize Groq client
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -116,7 +120,7 @@ with st.sidebar:
                             delete_chat(cid, bucket="archived")
 
 # ---------- Main Area ----------
-st.title("🤖 IndiBot (Mehnitavi)")
+st.title("🤖 Mehnitavi")
 
 if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
@@ -126,13 +130,21 @@ if current_id and current_id in store["active"]:
         with st.chat_message("user" if m["role"] == "user" else "assistant"):
             st.write(m["content"])
 
-    # input
-    text = st.chat_input("Ask Mehnitavi something…")
-    if text:
-        # save user msg
-        chat["messages"].append({"role": "user", "content": text})
+    # ---- Inputs ----
+    col1, col2, col3 = st.columns([3,1,1])
 
-        # send to Groq
+    with col1:
+        text = st.chat_input("Ask Mehnitavi something…")
+
+    with col2:
+        uploaded_img = st.file_uploader("📷 Upload Image", type=["png", "jpg", "jpeg"], label_visibility="collapsed")
+
+    with col3:
+        audio_file = st.file_uploader("🎤 Upload Voice", type=["wav", "mp3", "m4a"], label_visibility="collapsed")
+
+    # ---- Handle text ----
+    if text:
+        chat["messages"].append({"role": "user", "content": text})
         try:
             response = client.chat.completions.create(
                 model="llama3-8b-8192",
@@ -141,12 +153,65 @@ if current_id and current_id in store["active"]:
             )
             reply = response.choices[0].message.content
         except Exception as e:
-            reply = f"⚠️ Error talking to Mehnitavi: {e}"
-
-        # save AI reply
+            reply = f"⚠️ Error: {e}"
         chat["messages"].append({"role": "assistant", "content": reply})
-
         autotitle_if_needed(current_id)
         st.rerun()
+
+    # ---- Handle image ----
+    if uploaded_img:
+        img = Image.open(uploaded_img)
+        st.image(img, caption="Uploaded Image", use_container_width=True)
+        chat["messages"].append({"role": "user", "content": "📷 Sent an image."})
+
+        try:
+            # Convert image to base64
+            buffered = io.BytesIO()
+            img.save(buffered, format="PNG")
+            img_b64 = base64.b64encode(buffered.getvalue()).decode()
+
+            response = client.chat.completions.create(
+                model="llama3-8b-8192",  # If Groq supports multimodal
+                messages=[
+                    {"role": "system", "content": "You are Mehnitavi, a helpful assistant that can also analyze images."},
+                    {"role": "user", "content": f"Here’s an image (base64): {img_b64}. Please describe it."}
+                ],
+            )
+            reply = response.choices[0].message.content
+        except Exception as e:
+            reply = f"⚠️ Error analyzing image: {e}"
+
+        chat["messages"].append({"role": "assistant", "content": reply})
+        st.rerun()
+
+    # ---- Handle audio ----
+    if audio_file:
+        chat["messages"].append({"role": "user", "content": "🎤 Sent a voice message."})
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(audio_file.read())
+                tmp_path = tmp.name
+
+            # Transcribe audio
+            transcription = client.audio.transcriptions.create(
+                model="whisper-large-v3",
+                file=open(tmp_path, "rb")
+            )
+            user_text = transcription.text
+            chat["messages"].append({"role": "user", "content": f"(Voice) {user_text}"})
+
+            # Get reply
+            response = client.chat.completions.create(
+                model="llama3-8b-8192",
+                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
+                         + chat["messages"],
+            )
+            reply = response.choices[0].message.content
+        except Exception as e:
+            reply = f"⚠️ Error transcribing audio: {e}"
+
+        chat["messages"].append({"role": "assistant", "content": reply})
+        st.rerun()
+
 else:
     st.info("Start a new chat from the sidebar.")
