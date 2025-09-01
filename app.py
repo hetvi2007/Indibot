@@ -3,7 +3,8 @@ from datetime import datetime
 import uuid
 import os
 from groq import Groq
-from PyPDF2 import PdfReader
+from PyPDF2 import PdfReader  # ✅ added for PDF reading
+# from streamlit_mic_recorder import mic_recorder, speech_to_text  # ❌ remove if module not available
 
 # ---------- Setup ----------
 st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
@@ -59,30 +60,6 @@ def autotitle_if_needed(cid):
             if m["role"] == "user" and m["content"].strip():
                 chat["title"] = m["content"].strip()[:40]
                 break
-
-def read_file(uploaded_file):
-    """Extract content from supported files"""
-    file_type = uploaded_file.type
-    content = ""
-
-    if file_type == "text/plain":
-        content = uploaded_file.read().decode("utf-8")
-
-    elif file_type == "application/pdf":
-        reader = PdfReader(uploaded_file)
-        for page in reader.pages:
-            content += page.extract_text() or ""
-
-    elif file_type in ["audio/mpeg", "audio/wav"]:
-        content = f"(Audio file uploaded: {uploaded_file.name})"
-
-    elif file_type.startswith("image/"):
-        content = f"(Image uploaded: {uploaded_file.name})"
-
-    else:
-        content = f"(Unsupported file type: {uploaded_file.name})"
-
-    return content.strip()
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -160,7 +137,7 @@ if current_id and current_id in store["active"]:
     with c2:
         uploaded_file = st.file_uploader(
             "📎 Upload file",
-            type=["png", "jpg", "jpeg", "pdf", "txt", "mp3", "wav"],
+            type=["png", "jpg", "jpeg", "pdf", "txt"],
             label_visibility="collapsed"
         )
 
@@ -170,8 +147,21 @@ if current_id and current_id in store["active"]:
 
     # Handle file input
     if uploaded_file:
-        file_content = read_file(uploaded_file)
-        chat["messages"].append({"role": "user", "content": file_content})
+        file_content = None
+        if uploaded_file.type == "application/pdf":
+            reader = PdfReader(uploaded_file)
+            file_content = "\n".join([page.extract_text() or "" for page in reader.pages])
+        elif uploaded_file.type in ["text/plain"]:
+            file_content = uploaded_file.read().decode("utf-8", errors="ignore")
+        elif uploaded_file.type in ["image/png", "image/jpeg"]:
+            file_content = f"[Image uploaded: {uploaded_file.name}]"
+        else:
+            file_content = f"[Unsupported file type: {uploaded_file.type}]"
+
+        chat["messages"].append({
+            "role": "user",
+            "content": f"📎 Uploaded file: {uploaded_file.name}\n\n{file_content[:1000]}..."
+        })
 
     # If any user input was given, get reply
     if text or uploaded_file:
