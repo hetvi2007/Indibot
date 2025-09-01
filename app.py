@@ -60,21 +60,15 @@ def autotitle_if_needed(cid):
                 chat["title"] = m["content"].strip()[:40]
                 break
 
-def clear_all():
-    st.session_state.store = {"active": {}, "archived": {}}
-    st.session_state.current_id = None
-    st.cache_data.clear()
-    st.cache_resource.clear()
-
 # ---------- Sidebar ----------
 with st.sidebar:
     st.header("Options")
     st.button("✍️ New chat", use_container_width=True, on_click=new_chat)
-    st.button("🧹 Clear Chats & Cache", use_container_width=True, on_click=clear_all)
 
     st.markdown("---")
     st.subheader("Chats")
 
+    # Active chats
     if not store["active"]:
         st.caption("No chats yet. Start one!")
     else:
@@ -99,6 +93,7 @@ with st.sidebar:
                     if st.button("🗑️ Delete", key=f"del_{cid}"):
                         delete_chat(cid, bucket="active")
 
+    # Archived chats
     if store["archived"]:
         with st.expander("🗂️ Library"):
             for cid, chat in list(store["archived"].items())[::-1]:
@@ -127,20 +122,38 @@ st.title("🤖 Mehnitavi")
 if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
 
-    # show messages
+    # show messages with copy, edit, regenerate
     for idx, m in enumerate(chat["messages"]):
         with st.chat_message("user" if m["role"] == "user" else "assistant"):
             st.write(m["content"])
-            col1, col2 = st.columns([0.2, 0.2])
+
+            col1, col2, col3 = st.columns([0.2, 0.2, 0.3])
             with col1:
-                st.code(m["content"], language="markdown")  # shows with copy button
+                st.code(m["content"], language="markdown")  # copy feature
             with col2:
                 if st.button("✏️ Edit", key=f"edit_{idx}"):
                     new_text = st.text_area("Edit message:", value=m["content"], key=f"edit_box_{idx}")
                     if st.button("Save Edit", key=f"save_{idx}"):
                         chat["messages"][idx]["content"] = new_text
                         st.rerun()
+            if m["role"] == "assistant":
+                with col3:
+                    if st.button("🔄 Regenerate", key=f"regen_{idx}"):
+                        # find last user message before this
+                        if idx > 0 and chat["messages"][idx-1]["role"] == "user":
+                            try:
+                                response = client.chat.completions.create(
+                                    model="llama-3.1-8b-instant",
+                                    messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
+                                             + chat["messages"][:idx],
+                                )
+                                new_reply = response.choices[0].message.content
+                            except Exception as e:
+                                new_reply = f"⚠️ Error regenerating: {e}"
+                            chat["messages"][idx]["content"] = new_reply
+                            st.rerun()
 
+    # --- Input methods ---
     text = st.chat_input("Ask Mehnitavi something…")
 
     uploaded_file = st.file_uploader(
@@ -149,20 +162,25 @@ if current_id and current_id in store["active"]:
         label_visibility="collapsed"
     )
 
+    # Handle text input
     if text:
         chat["messages"].append({"role": "user", "content": text})
 
+    # Handle file input
     if uploaded_file:
+        file_content = None
         if uploaded_file.type == "application/pdf":
-            pdf = PdfReader(uploaded_file)
-            file_text = "\n".join([page.extract_text() or "" for page in pdf.pages])
-            chat["messages"].append({"role": "user", "content": f"📄 {uploaded_file.name}:\n{file_text[:500]}..."})
-        elif uploaded_file.type.startswith("text/"):
-            file_text = uploaded_file.read().decode("utf-8")
-            chat["messages"].append({"role": "user", "content": f"📄 {uploaded_file.name}:\n{file_text[:500]}..."})
+            reader = PdfReader(uploaded_file)
+            file_content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
         else:
-            chat["messages"].append({"role": "user", "content": f"📎 Uploaded file: {uploaded_file.name}"})
+            try:
+                file_content = uploaded_file.read().decode("utf-8")
+            except:
+                file_content = f"📎 Uploaded file: {uploaded_file.name}"
 
+        chat["messages"].append({"role": "user", "content": file_content})
+
+    # If any user input was given, get reply
     if text or uploaded_file:
         try:
             response = client.chat.completions.create(
