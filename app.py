@@ -3,8 +3,7 @@ from datetime import datetime
 import uuid
 import os
 from groq import Groq
-from PyPDF2 import PdfReader  # ✅ added for PDF reading
-# from streamlit_mic_recorder import mic_recorder, speech_to_text  # ❌ remove if module not available
+from PyPDF2 import PdfReader
 
 # ---------- Setup ----------
 st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
@@ -123,10 +122,26 @@ st.title("🤖 Mehnitavi")
 if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
 
-    # show messages
-    for m in chat["messages"]:
+    # --- Show messages with copy & edit ---
+    for i, m in enumerate(chat["messages"]):
         with st.chat_message("user" if m["role"] == "user" else "assistant"):
             st.write(m["content"])
+            cols = st.columns([0.15, 0.15, 0.7])
+            if cols[0].button("📋 Copy", key=f"copy_{i}"):
+                st.session_state["copied_text"] = m["content"]
+            if cols[1].button("✏️ Edit", key=f"edit_{i}"):
+                st.session_state["edit_text"] = m["content"]
+
+    # If edit mode is active
+    if "edit_text" in st.session_state and st.session_state["edit_text"]:
+        edited = st.text_area("✏️ Edit message:", st.session_state["edit_text"], key="edit_area")
+        if st.button("💾 Save edit"):
+            for j in range(len(chat["messages"]) - 1, -1, -1):
+                if chat["messages"][j]["role"] == "user":
+                    chat["messages"][j]["content"] = edited
+                    break
+            st.session_state["edit_text"] = ""
+            st.rerun()
 
     # --- Input methods ---
     c1, c2 = st.columns([3, 1])
@@ -137,7 +152,7 @@ if current_id and current_id in store["active"]:
     with c2:
         uploaded_file = st.file_uploader(
             "📎 Upload file",
-            type=["png", "jpg", "jpeg", "pdf", "txt"],
+            type=["png", "jpg", "jpeg", "pdf", "txt", "mp3", "wav"],
             label_visibility="collapsed"
         )
 
@@ -149,19 +164,14 @@ if current_id and current_id in store["active"]:
     if uploaded_file:
         file_content = None
         if uploaded_file.type == "application/pdf":
-            reader = PdfReader(uploaded_file)
-            file_content = "\n".join([page.extract_text() or "" for page in reader.pages])
-        elif uploaded_file.type in ["text/plain"]:
-            file_content = uploaded_file.read().decode("utf-8", errors="ignore")
-        elif uploaded_file.type in ["image/png", "image/jpeg"]:
-            file_content = f"[Image uploaded: {uploaded_file.name}]"
+            pdf_reader = PdfReader(uploaded_file)
+            file_content = "\n".join([page.extract_text() for page in pdf_reader.pages])
+        elif uploaded_file.type.startswith("text/"):
+            file_content = uploaded_file.read().decode("utf-8")
         else:
-            file_content = f"[Unsupported file type: {uploaded_file.type}]"
+            file_content = f"📎 Uploaded file: {uploaded_file.name}"
 
-        chat["messages"].append({
-            "role": "user",
-            "content": f"📎 Uploaded file: {uploaded_file.name}\n\n{file_content[:1000]}..."
-        })
+        chat["messages"].append({"role": "user", "content": file_content})
 
     # If any user input was given, get reply
     if text or uploaded_file:
@@ -178,5 +188,10 @@ if current_id and current_id in store["active"]:
         chat["messages"].append({"role": "assistant", "content": reply})
         autotitle_if_needed(current_id)
         st.rerun()
+
 else:
     st.info("Start a new chat from the sidebar.")
+
+# Show copied preview
+if "copied_text" in st.session_state and st.session_state["copied_text"]:
+    st.info(f"📋 Copied: {st.session_state['copied_text'][:50]}...")
