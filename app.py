@@ -1,199 +1,231 @@
-import streamlit as st
-from datetime import datetime
-import uuid
+# app.py
 import os
-from groq import Groq
-from PyPDF2 import PdfReader
+import io
+import base64
+import uuid
+from datetime import datetime
 
-# ---------- Setup ----------
+import streamlit as st
+from groq import Groq
+
+# ------------------------- App setup -------------------------
 st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
 
-# Initialize Groq client
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+# Brand header
+st.markdown(
+    """
+    <style>
+    .brand { display:flex; align-items:center; gap:.6rem; }
+    .brand .logo{font-size:1.6rem}
+    .bubble { position:relative; padding:12px 14px; border-radius:14px; margin:4px 0 10px 0; }
+    .bubble.user { background:#f2f5ff; border:1px solid #e3e8ff; }
+    .bubble.assistant { background:#f7faf9; border:1px solid #ebf2ef; }
+    .msg-tools { position:absolute; right:8px; top:8px; display:flex; gap:6px; }
+    .msg-tools button { padding:2px 8px; font-size:.8rem; }
+    .copy-btn { background:#f6f6f6; border:1px solid #e6e6e6; border-radius:8px; cursor:pointer; }
+    .copy-ok { color:#2e7d32; font-weight:600; margin-left:6px; }
+    .small-note { color:#6b7280; font-size:.85rem; }
+    .file-pill { display:inline-flex; align-items:center; gap:.35rem; padding:.18rem .5rem; border-radius:999px;
+                 background:#eef2ff; border:1px solid #e5e7ff; margin-right:.35rem; }
+    </style>
+    <div class="brand"><div class="logo">🤖</div><h1 style="margin:0">Mehnitavi</h1></div>
+    """,
+    unsafe_allow_html=True,
+)
 
-# ---------- Session Store ----------
-store = st.session_state.setdefault("store", {"active": {}, "archived": {}})
-current_id = st.session_state.setdefault("current_id", None)
+# ------------------------- API client -------------------------
+API_KEY = os.environ.get("GROQ_API_KEY") or st.secrets.get("GROQ_API_KEY", "")
+client = Groq(api_key=API_KEY) if API_KEY else None
+MODEL = "llama-3.1-8b-instant"
 
-# ---------- Helpers ----------
-def new_chat():
-    cid = uuid.uuid4().hex[:8]
-    store["active"][cid] = {
-        "title": "New Chat",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "messages": []
-    }
-    st.session_state.current_id = cid
+# ------------------------- Session state -------------------------
+if "messages" not in st.session_state:
+    st.session_state.messages = []   # [{id, role, content, files: [ {name, kind, note} ]}]
+if "pending_edit" not in st.session_state:
+    st.session_state.pending_edit = None  # message id being edited
+if "last_files" not in st.session_state:
+    st.session_state.last_files = []  # cache of uploaded file descriptors for the next turn
 
-def open_chat(cid):
-    st.session_state.current_id = cid
 
-def rename_chat(cid, new_title, bucket="active"):
-    if new_title.strip():
-        store[bucket][cid]["title"] = new_title.strip()
+# ------------------------- Utilities -------------------------
+def _uid() -> str:
+    return uuid.uuid4().hex[:8]
 
-def delete_chat(cid, bucket="active"):
-    store[bucket].pop(cid, None)
-    if bucket == "active" and st.session_state.current_id == cid:
-        st.session_state.current_id = None
 
-def archive_chat(cid):
-    store["archived"][cid] = store["active"].pop(cid)
-    if st.session_state.current_id == cid:
-        st.session_state.current_id = None
+def attach_file_descriptor(file) -> dict:
+    """
+    Create a lightweight descriptor for the uploaded file so the model
+    can be told what was attached (no external parsers required).
+    """
+    name = file.name
+    size = file.size
+    ext = (name.split(".")[-1] or "").lower()
+    kind = "audio" if ext in {"mp3", "wav", "m4a"} else "image" if ext in {"png", "jpg", "jpeg"} else "document"
+    note = f"Attached {kind} file '{name}' ({size} bytes)."
+    return {"name": name, "kind": kind, "note": note}
 
-def restore_chat(cid):
-    store["active"][cid] = store["archived"].pop(cid)
 
-def export_text(cid, bucket="active"):
-    chat = store[bucket][cid]
-    lines = [f"Title: {chat['title']}", f"Created: {chat['created_at']}", "-"*40]
-    for m in chat["messages"]:
-        lines.append(f"{m['role'].capitalize()}: {m['content']}")
-    return "\n".join(lines)
+def render_copy_js(text: str, key: str):
+    """
+    Renders a compact 'Copy' button that copies `text` to clipboard (no extra libs).
+    """
+    payload = base64.b64encode(text.encode("utf-8")).decode("utf-8")
+    html = f"""
+    <script>
+      function copy_{key}(){{
+        const t = atob("{payload}");
+        navigator.clipboard.writeText(t).then(() => {{
+          const ok = document.getElementById("ok-{key}");
+          if(ok) {{ ok.style.display = "inline"; setTimeout(() => ok.style.display="none", 1000); }}
+        }});
+      }}
+    </script>
+    <button class="copy-btn" onclick="copy_{key}()">Copy</button>
+    <span id="ok-{key}" class="copy-ok" style="display:none;">Copied</span>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
-def autotitle_if_needed(cid):
-    chat = store["active"][cid]
-    if chat["title"] == "New Chat":
-        for m in chat["messages"]:
-            if m["role"] == "user" and m["content"].strip():
-                chat["title"] = m["content"].strip()[:40]
-                break
 
-# ---------- Sidebar ----------
+def groq_chat(messages):
+    """
+    Call Groq chat completion safely.
+    """
+    if not client:
+        return "⚠️ GROQ_API_KEY is missing. Add it to your secrets.toml or env."
+
+    try:
+        resp = client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            temperature=0.6,
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        return f"⚠️ Error talking to Mehnitavi: {e}"
+
+
+# ------------------------- Sidebar -------------------------
 with st.sidebar:
-    st.header("Options")
-    st.button("✍️ New chat", use_container_width=True, on_click=new_chat)
+    st.subheader("Options")
+    if st.button("🆕 New chat", use_container_width=True):
+        st.session_state.messages = []
+        st.session_state.last_files = []
+        st.session_state.pending_edit = None
+        st.rerun()
 
     st.markdown("---")
-    st.subheader("Chats")
+    st.caption("Voice: upload an audio note. Mehnitavi will acknowledge it (no live mic dependency).")
+    st.caption("Files: PDF/TXT/DOCX/PNG/JPG/MP3/WAV are accepted and referenced in the reply.")
 
-    # Active chats
-    if not store["active"]:
-        st.caption("No chats yet. Start one!")
-    else:
-        for cid, chat in list(store["active"].items())[::-1]:
-            c1, c2 = st.columns([0.8, 0.2])
-            if c1.button(chat["title"] or "Untitled", key=f"open_{cid}", use_container_width=True):
-                open_chat(cid)
-            with c2:
-                with st.popover("⋮"):
-                    new_name = st.text_input("Rename", value=chat["title"], key=f"rn_{cid}")
-                    if st.button("💾 Save name", key=f"rns_{cid}"):
-                        rename_chat(cid, new_name, bucket="active")
-                    st.download_button(
-                        "⬇️ Download (.txt)",
-                        data=export_text(cid, bucket="active"),
-                        file_name=f"{(chat['title'] or 'chat')}.txt",
-                        key=f"dl_{cid}",
-                        use_container_width=True,
-                    )
-                    if st.button("📦 Archive", key=f"arc_{cid}"):
-                        archive_chat(cid)
-                    if st.button("🗑️ Delete", key=f"del_{cid}"):
-                        delete_chat(cid, bucket="active")
 
-    # Archived chats
-    if store["archived"]:
-        with st.expander("🗂️ Library"):
-            for cid, chat in list(store["archived"].items())[::-1]:
-                c1, c2 = st.columns([0.8, 0.2])
-                c1.write(f"📄 {chat['title'] or 'Untitled'}")
-                with c2:
-                    with st.popover("⋮"):
-                        new_name = st.text_input("Rename", value=chat["title"], key=f"arn_{cid}")
-                        if st.button("💾 Save name", key=f"arns_{cid}"):
-                            rename_chat(cid, new_name, bucket="archived")
-                        st.download_button(
-                            "⬇️ Download (.txt)",
-                            data=export_text(cid, bucket="archived"),
-                            file_name=f"{(chat['title'] or 'chat')}.txt",
-                            key=f"adl_{cid}",
-                            use_container_width=True,
-                        )
-                        if st.button("↩️ Restore", key=f"res_{cid}"):
-                            restore_chat(cid)
-                        if st.button("🗑️ Delete", key=f"adel_{cid}"):
-                            delete_chat(cid, bucket="archived")
+# ------------------------- Chat history rendering -------------------------
+for msg in st.session_state.messages:
+    role = "user" if msg["role"] == "user" else "assistant"
+    bubble_class = f"bubble {role}"
 
-# ---------- Main Area ----------
-st.title("🤖 Mehnitavi")
+    with st.container():
+        st.markdown(f'<div class="{bubble_class}">', unsafe_allow_html=True)
 
-if current_id and current_id in store["active"]:
-    chat = store["active"][current_id]
-
-    # show messages with copy, edit, regenerate
-    for idx, m in enumerate(chat["messages"]):
-        with st.chat_message("user" if m["role"] == "user" else "assistant"):
-            st.write(m["content"])
-
-            col1, col2, col3 = st.columns([0.2, 0.2, 0.3])
-            with col1:
-                st.code(m["content"], language="markdown")  # copy feature
-            with col2:
-                if st.button("✏️ Edit", key=f"edit_{idx}"):
-                    new_text = st.text_area("Edit message:", value=m["content"], key=f"edit_box_{idx}")
-                    if st.button("Save Edit", key=f"save_{idx}"):
-                        chat["messages"][idx]["content"] = new_text
-                        st.rerun()
-            if m["role"] == "assistant":
-                with col3:
-                    if st.button("🔄 Regenerate", key=f"regen_{idx}"):
-                        # find last user message before this
-                        if idx > 0 and chat["messages"][idx-1]["role"] == "user":
-                            try:
-                                response = client.chat.completions.create(
-                                    model="llama-3.1-8b-instant",
-                                    messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
-                                             + chat["messages"][:idx],
-                                )
-                                new_reply = response.choices[0].message.content
-                            except Exception as e:
-                                new_reply = f"⚠️ Error regenerating: {e}"
-                            chat["messages"][idx]["content"] = new_reply
+        # Copy + Edit/Regenerate tool row
+        col_tools = st.columns([1, 9, 2])
+        with col_tools[0]:
+            pass
+        with col_tools[1]:
+            # Show message content
+            st.markdown(msg["content"])
+            # Show any file “pills”
+            if msg.get("files"):
+                pills = " ".join([f"<span class='file-pill'>📎 {f['name']}</span>" for f in msg["files"]])
+                st.markdown(pills, unsafe_allow_html=True)
+        with col_tools[2]:
+            # Per-message tools
+            render_copy_js(msg["content"], key=msg["id"])
+            if msg["role"] == "user":
+                if st.session_state.pending_edit == msg["id"]:
+                    new_text = st.text_area("Edit message", value=msg["content"], key=f"edit-{msg['id']}")
+                    col_e1, col_e2 = st.columns(2)
+                    with col_e1:
+                        if st.button("Save", key=f"save-{msg['id']}"):
+                            msg["content"] = new_text
+                            st.session_state.pending_edit = None
                             st.rerun()
+                    with col_e2:
+                        if st.button("Cancel", key=f"cancel-{msg['id']}"):
+                            st.session_state.pending_edit = None
+                            st.rerun()
+                else:
+                    if st.button("✏️ Edit", key=f"editbtn-{msg['id']}"):
+                        st.session_state.pending_edit = msg["id"]
+                        st.rerun()
+            else:
+                # Assistant: allow regenerate (re-run last prompt)
+                if st.button("🔁 Regenerate", key=f"regen-{msg['id']}"):
+                    # Find the last user message before this assistant message
+                    idx = st.session_state.messages.index(msg)
+                    # If the assistant's reply immediately follows a user prompt, regenerate from that context
+                    history_for_model = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:idx]]
+                    new_reply = groq_chat(history_for_model)
+                    msg["content"] = new_reply
+                    st.rerun()
 
-    # --- Input methods ---
-    text = st.chat_input("Ask Mehnitavi something…")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    uploaded_file = st.file_uploader(
-        "📎 Upload file",
-        type=["png", "jpg", "jpeg", "pdf", "txt", "mp3", "wav"],
-        label_visibility="collapsed"
+# ------------------------- Input row -------------------------
+st.markdown("### ")
+with st.container(border=True):
+    st.write("**Upload attachments (optional)**")
+    uploads = st.file_uploader(
+        "Drag & drop files or browse",
+        type=["png", "jpg", "jpeg", "pdf", "txt", "docx", "mp3", "wav", "m4a"],
+        accept_multiple_files=True,
+        label_visibility="collapsed",
     )
 
-    # Handle text input
-    if text:
-        chat["messages"].append({"role": "user", "content": text})
+    # Attach uploaded files as descriptors (no external parsing libs)
+    attached = []
+    if uploads:
+        for f in uploads:
+            attached.append(attach_file_descriptor(f))
+        st.session_state.last_files = attached
 
-    # Handle file input
-    if uploaded_file:
-        file_content = None
-        if uploaded_file.type == "application/pdf":
-            reader = PdfReader(uploaded_file)
-            file_content = "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-        else:
-            try:
-                file_content = uploaded_file.read().decode("utf-8")
-            except:
-                file_content = f"📎 Uploaded file: {uploaded_file.name}"
+# Text prompt
+user_text = st.chat_input("Ask Mehnitavi something…")
 
-        chat["messages"].append({"role": "user", "content": file_content})
+# ------------------------- Handle send -------------------------
+if user_text:
+    # 1) Add user message (with any queued file descriptors)
+    user_msg = {"id": _uid(), "role": "user", "content": user_text, "time": datetime.now().isoformat()}
+    if st.session_state.last_files:
+        user_msg["files"] = st.session_state.last_files
+    st.session_state.messages.append(user_msg)
 
-    # If any user input was given, get reply
-    if text or uploaded_file:
-        try:
-            response = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
-                         + chat["messages"],
-            )
-            reply = response.choices[0].message.content
-        except Exception as e:
-            reply = f"⚠️ Error talking to Mehnitavi: {e}"
+    # 2) Build model messages (inject file notes into the user turn so model knows what was attached)
+    model_turns = [{"role": "system", "content": "You are Mehnitavi, a helpful and concise assistant."}]
+    for m in st.session_state.messages:
+        content = m["content"]
+        if m.get("files"):
+            notes = "\n".join([f"- {f['note']}" for f in m["files"]])
+            content = f"{content}\n\n[User attached files this turn]\n{notes}"
+        model_turns.append({"role": m["role"], "content": content})
 
-        chat["messages"].append({"role": "assistant", "content": reply})
-        autotitle_if_needed(current_id)
-        st.rerun()
-else:
-    st.info("Start a new chat from the sidebar.")
+    # 3) Get assistant reply
+    reply = groq_chat(model_turns)
+
+    # 4) Append assistant message
+    st.session_state.messages.append({"id": _uid(), "role": "assistant", "content": reply, "time": datetime.now().isoformat()})
+
+    # 5) Clear queued files for next turn
+    st.session_state.last_files = []
+
+    st.rerun()
+
+# ------------------------- Empty state -------------------------
+if not st.session_state.messages:
+    st.markdown(
+        """
+        <p class="small-note">
+        Tip: you can attach PDFs, text, images, or audio notes. Mehnitavi will acknowledge attachments and answer using the message context.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
