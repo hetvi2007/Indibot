@@ -3,7 +3,6 @@ from datetime import datetime
 import uuid
 import os
 from groq import Groq
-from streamlit_mic_recorder import mic_recorder, speech_to_text
 
 # ---------- Setup ----------
 st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
@@ -128,21 +127,12 @@ if current_id and current_id in store["active"]:
             st.write(m["content"])
 
     # --- Input methods ---
-    c1, c2, c3 = st.columns([3, 1, 1])
+    c1, c2 = st.columns([3, 1])
 
     with c1:
         text = st.chat_input("Ask Mehnitavi something…")
 
     with c2:
-        voice = mic_recorder(
-            start_prompt="🎤 Record",
-            stop_prompt="⏹️ Stop",
-            just_once=True,
-            use_container_width=True,
-            key="voice_recorder"
-        )
-
-    with c3:
         uploaded_file = st.file_uploader(
             "📎 Upload file",
             type=["png", "jpg", "jpeg", "pdf", "txt", "mp3", "wav"],
@@ -153,17 +143,13 @@ if current_id and current_id in store["active"]:
     if text:
         chat["messages"].append({"role": "user", "content": text})
 
-    # Handle voice input
-    if voice:
-        chat["messages"].append({"role": "user", "content": speech_to_text(voice)})
-
     # Handle file input
     if uploaded_file:
         file_content = uploaded_file.read()
         chat["messages"].append({"role": "user", "content": f"📎 Uploaded file: {uploaded_file.name}"})
 
     # If any user input was given, get reply
-    if text or voice or uploaded_file:
+    if text or uploaded_file:
         try:
             response = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
