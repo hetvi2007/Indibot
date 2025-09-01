@@ -2,6 +2,7 @@ import streamlit as st
 from datetime import datetime
 import uuid
 import os
+import pyperclip
 from groq import Groq
 from PyPDF2 import PdfReader
 
@@ -60,10 +61,17 @@ def autotitle_if_needed(cid):
                 chat["title"] = m["content"].strip()[:40]
                 break
 
+def clear_all():
+    st.session_state.store = {"active": {}, "archived": {}}
+    st.session_state.current_id = None
+    st.cache_data.clear()
+    st.cache_resource.clear()
+
 # ---------- Sidebar ----------
 with st.sidebar:
     st.header("Options")
     st.button("✍️ New chat", use_container_width=True, on_click=new_chat)
+    st.button("🧹 Clear Chats & Cache", use_container_width=True, on_click=clear_all)
 
     st.markdown("---")
     st.subheader("Chats")
@@ -122,39 +130,30 @@ st.title("🤖 Mehnitavi")
 if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
 
-    # --- Show messages with copy & edit ---
-    for i, m in enumerate(chat["messages"]):
+    # show messages
+    for idx, m in enumerate(chat["messages"]):
         with st.chat_message("user" if m["role"] == "user" else "assistant"):
             st.write(m["content"])
-            cols = st.columns([0.15, 0.15, 0.7])
-            if cols[0].button("📋 Copy", key=f"copy_{i}"):
-                st.session_state["copied_text"] = m["content"]
-            if cols[1].button("✏️ Edit", key=f"edit_{i}"):
-                st.session_state["edit_text"] = m["content"]
-
-    # If edit mode is active
-    if "edit_text" in st.session_state and st.session_state["edit_text"]:
-        edited = st.text_area("✏️ Edit message:", st.session_state["edit_text"], key="edit_area")
-        if st.button("💾 Save edit"):
-            for j in range(len(chat["messages"]) - 1, -1, -1):
-                if chat["messages"][j]["role"] == "user":
-                    chat["messages"][j]["content"] = edited
-                    break
-            st.session_state["edit_text"] = ""
-            st.rerun()
+            col1, col2 = st.columns([0.2, 0.2])
+            with col1:
+                if st.button("📋 Copy", key=f"copy_{idx}"):
+                    pyperclip.copy(m["content"])
+                    st.toast("Copied to clipboard ✅")
+            with col2:
+                if st.button("✏️ Edit", key=f"edit_{idx}"):
+                    new_text = st.text_area("Edit message:", value=m["content"], key=f"edit_box_{idx}")
+                    if st.button("Save Edit", key=f"save_{idx}"):
+                        chat["messages"][idx]["content"] = new_text
+                        st.rerun()
 
     # --- Input methods ---
-    c1, c2 = st.columns([3, 1])
+    text = st.chat_input("Ask Mehnitavi something…")
 
-    with c1:
-        text = st.chat_input("Ask Mehnitavi something…")
-
-    with c2:
-        uploaded_file = st.file_uploader(
-            "📎 Upload file",
-            type=["png", "jpg", "jpeg", "pdf", "txt", "mp3", "wav"],
-            label_visibility="collapsed"
-        )
+    uploaded_file = st.file_uploader(
+        "📎 Upload file",
+        type=["png", "jpg", "jpeg", "pdf", "txt", "mp3", "wav"],
+        label_visibility="collapsed"
+    )
 
     # Handle text input
     if text:
@@ -162,16 +161,15 @@ if current_id and current_id in store["active"]:
 
     # Handle file input
     if uploaded_file:
-        file_content = None
         if uploaded_file.type == "application/pdf":
-            pdf_reader = PdfReader(uploaded_file)
-            file_content = "\n".join([page.extract_text() for page in pdf_reader.pages])
+            pdf = PdfReader(uploaded_file)
+            file_text = "\n".join([page.extract_text() or "" for page in pdf.pages])
+            chat["messages"].append({"role": "user", "content": f"📄 {uploaded_file.name}:\n{file_text[:500]}..."})
         elif uploaded_file.type.startswith("text/"):
-            file_content = uploaded_file.read().decode("utf-8")
+            file_text = uploaded_file.read().decode("utf-8")
+            chat["messages"].append({"role": "user", "content": f"📄 {uploaded_file.name}:\n{file_text[:500]}..."})
         else:
-            file_content = f"📎 Uploaded file: {uploaded_file.name}"
-
-        chat["messages"].append({"role": "user", "content": file_content})
+            chat["messages"].append({"role": "user", "content": f"📎 Uploaded file: {uploaded_file.name}"})
 
     # If any user input was given, get reply
     if text or uploaded_file:
@@ -188,10 +186,5 @@ if current_id and current_id in store["active"]:
         chat["messages"].append({"role": "assistant", "content": reply})
         autotitle_if_needed(current_id)
         st.rerun()
-
 else:
     st.info("Start a new chat from the sidebar.")
-
-# Show copied preview
-if "copied_text" in st.session_state and st.session_state["copied_text"]:
-    st.info(f"📋 Copied: {st.session_state['copied_text'][:50]}...")
