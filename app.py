@@ -3,6 +3,7 @@ from datetime import datetime
 import uuid
 import os
 from groq import Groq
+from PyPDF2 import PdfReader
 
 # ---------- Setup ----------
 st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
@@ -58,6 +59,30 @@ def autotitle_if_needed(cid):
             if m["role"] == "user" and m["content"].strip():
                 chat["title"] = m["content"].strip()[:40]
                 break
+
+def read_file(uploaded_file):
+    """Extract content from supported files"""
+    file_type = uploaded_file.type
+    content = ""
+
+    if file_type == "text/plain":
+        content = uploaded_file.read().decode("utf-8")
+
+    elif file_type == "application/pdf":
+        reader = PdfReader(uploaded_file)
+        for page in reader.pages:
+            content += page.extract_text() or ""
+
+    elif file_type in ["audio/mpeg", "audio/wav"]:
+        content = f"(Audio file uploaded: {uploaded_file.name})"
+
+    elif file_type.startswith("image/"):
+        content = f"(Image uploaded: {uploaded_file.name})"
+
+    else:
+        content = f"(Unsupported file type: {uploaded_file.name})"
+
+    return content.strip()
 
 # ---------- Sidebar ----------
 with st.sidebar:
@@ -145,8 +170,8 @@ if current_id and current_id in store["active"]:
 
     # Handle file input
     if uploaded_file:
-        file_content = uploaded_file.read()
-        chat["messages"].append({"role": "user", "content": f"📎 Uploaded file: {uploaded_file.name}"})
+        file_content = read_file(uploaded_file)
+        chat["messages"].append({"role": "user", "content": file_content})
 
     # If any user input was given, get reply
     if text or uploaded_file:
