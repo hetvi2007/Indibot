@@ -2,7 +2,6 @@ import streamlit as st
 from datetime import datetime
 import uuid
 import os
-import pyperclip
 from groq import Groq
 from PyPDF2 import PdfReader
 
@@ -76,7 +75,6 @@ with st.sidebar:
     st.markdown("---")
     st.subheader("Chats")
 
-    # Active chats
     if not store["active"]:
         st.caption("No chats yet. Start one!")
     else:
@@ -101,7 +99,6 @@ with st.sidebar:
                     if st.button("🗑️ Delete", key=f"del_{cid}"):
                         delete_chat(cid, bucket="active")
 
-    # Archived chats
     if store["archived"]:
         with st.expander("🗂️ Library"):
             for cid, chat in list(store["archived"].items())[::-1]:
@@ -136,9 +133,7 @@ if current_id and current_id in store["active"]:
             st.write(m["content"])
             col1, col2 = st.columns([0.2, 0.2])
             with col1:
-                if st.button("📋 Copy", key=f"copy_{idx}"):
-                    pyperclip.copy(m["content"])
-                    st.toast("Copied to clipboard ✅")
+                st.code(m["content"], language="markdown")  # shows with copy button
             with col2:
                 if st.button("✏️ Edit", key=f"edit_{idx}"):
                     new_text = st.text_area("Edit message:", value=m["content"], key=f"edit_box_{idx}")
@@ -146,7 +141,6 @@ if current_id and current_id in store["active"]:
                         chat["messages"][idx]["content"] = new_text
                         st.rerun()
 
-    # --- Input methods ---
     text = st.chat_input("Ask Mehnitavi something…")
 
     uploaded_file = st.file_uploader(
@@ -155,11 +149,9 @@ if current_id and current_id in store["active"]:
         label_visibility="collapsed"
     )
 
-    # Handle text input
     if text:
         chat["messages"].append({"role": "user", "content": text})
 
-    # Handle file input
     if uploaded_file:
         if uploaded_file.type == "application/pdf":
             pdf = PdfReader(uploaded_file)
@@ -171,7 +163,6 @@ if current_id and current_id in store["active"]:
         else:
             chat["messages"].append({"role": "user", "content": f"📎 Uploaded file: {uploaded_file.name}"})
 
-    # If any user input was given, get reply
     if text or uploaded_file:
         try:
             response = client.chat.completions.create(
