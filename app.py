@@ -3,29 +3,19 @@ from datetime import datetime
 import uuid
 import os
 from groq import Groq
-from streamlit_mic_recorder import mic_recorder, speech_to_text
+from PyPDF2 import PdfReader
 
-# ----------------- PAGE CONFIG -----------------
+# ---------- Setup ----------
 st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
 
-# ----------------- STYLE FIXES -----------------
-st.markdown("""
-    <style>
-    /* Hide drag-drop area + extra file uploader text */
-    div[data-testid="stFileUploaderDropzone"] {display: none;}
-    div[data-testid="stFileUploader"] section {display: none;}
-    div[data-testid="stFileUploader"] small {display: none;}
-    </style>
-""", unsafe_allow_html=True)
-
-# ----------------- INIT CLIENT -----------------
+# Initialize Groq client
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# ----------------- SESSION STORE -----------------
+# ---------- Session Store ----------
 store = st.session_state.setdefault("store", {"active": {}, "archived": {}})
 current_id = st.session_state.setdefault("current_id", None)
 
-# ----------------- HELPERS -----------------
+# ---------- Helpers ----------
 def new_chat():
     cid = uuid.uuid4().hex[:8]
     store["active"][cid] = {
@@ -70,7 +60,16 @@ def autotitle_if_needed(cid):
                 chat["title"] = m["content"].strip()[:40]
                 break
 
-# ----------------- SIDEBAR -----------------
+def extract_text_from_file(uploaded_file):
+    if uploaded_file.type == "application/pdf":
+        pdf = PdfReader(uploaded_file)
+        return "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
+    elif uploaded_file.type.startswith("text/"):
+        return uploaded_file.read().decode("utf-8", errors="ignore")
+    else:
+        return f"📎 Uploaded file: {uploaded_file.name}"
+
+# ---------- Sidebar ----------
 with st.sidebar:
     st.header("Options")
     st.button("✍️ New chat", use_container_width=True, on_click=new_chat)
@@ -126,67 +125,41 @@ with st.sidebar:
                         if st.button("🗑️ Delete", key=f"adel_{cid}"):
                             delete_chat(cid, bucket="archived")
 
-# ----------------- MAIN AREA -----------------
+# ---------- Main Area ----------
 st.title("🤖 Mehnitavi")
 
 if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
 
-    # Show chat history
+    # show messages
     for m in chat["messages"]:
         with st.chat_message("user" if m["role"] == "user" else "assistant"):
-            st.markdown(m["content"])
-            if m["role"] == "assistant":
-                st.markdown(
-                    """
-                    <div style='display: flex; gap: 15px; margin-top: 5px; font-size: 18px; color: gray;'>
-                        <span title='Copy'>📋</span>
-                        <span title='Like'>👍</span>
-                        <span title='Dislike'>👎</span>
-                        <span title='Speak'>🔊</span>
-                        <span title='Share'>⤴️</span>
-                        <span title='Refresh'>🔄</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+            st.write(m["content"])
 
-    # --- Input row (upload + chat + mic) ---
-    col1, col2, col3 = st.columns([0.1, 0.7, 0.2])
+    # --- Input methods ---
+    c1, c2 = st.columns([3, 1])
 
-    with col1:
+    with c1:
+        text = st.chat_input("Ask Mehnitavi something…")
+
+    with c2:
         uploaded_file = st.file_uploader(
             "📎",
             type=["png", "jpg", "jpeg", "pdf", "txt", "mp3", "wav"],
             label_visibility="collapsed"
         )
 
-    with col2:
-        text = st.chat_input("Ask Mehnitavi something…")
-
-    with col3:
-        voice = mic_recorder(
-            start_prompt="🎤 Record",
-            stop_prompt="⏹️ Stop",
-            just_once=True,
-            use_container_width=True,
-            key="voice_recorder"
-        )
-
-    # Handle text
+    # Handle text input
     if text:
         chat["messages"].append({"role": "user", "content": text})
 
-    # Handle voice
-    if voice:
-        chat["messages"].append({"role": "user", "content": speech_to_text(voice)})
-
-    # Handle file
+    # Handle file input
     if uploaded_file:
-        chat["messages"].append({"role": "user", "content": f"📎 Uploaded file: {uploaded_file.name}"})
+        file_content = extract_text_from_file(uploaded_file)
+        chat["messages"].append({"role": "user", "content": file_content})
 
-    # Send to LLM
-    if text or voice or uploaded_file:
+    # If any user input was given, get reply
+    if text or uploaded_file:
         try:
             response = client.chat.completions.create(
                 model="llama-3.1-8b-instant",
@@ -200,6 +173,5 @@ if current_id and current_id in store["active"]:
         chat["messages"].append({"role": "assistant", "content": reply})
         autotitle_if_needed(current_id)
         st.rerun()
-
 else:
     st.info("Start a new chat from the sidebar.")
