@@ -1,131 +1,138 @@
 import streamlit as st
+import os
 from groq import Groq
-import uuid
+import tempfile
 from PyPDF2 import PdfReader
-from docx import Document
 import pandas as pd
-from pptx import Presentation
+import docx
 
-# --- Groq API Client ---
-client = Groq(api_key=st.secrets["GROQ_API_KEY"])
+# -------------------------------
+# Page config
+# -------------------------------
+st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
 
-# --- Generate unique IDs for messages ---
-def _uid():
-    return str(uuid.uuid4())[:8]
+# -------------------------------
+# Sidebar branding
+# -------------------------------
+with st.sidebar:
+    st.image("robot.png", width=100)  # Make sure robot.png is in your repo
+    st.title("Mehnitavi")
 
-# --- Initialize session state ---
-if "chats" not in st.session_state:
-    st.session_state.chats = [{"title": "New Chat", "messages": []}]
-if "current_chat" not in st.session_state:
-    st.session_state.current_chat = 0
+# -------------------------------
+# Groq client setup
+# -------------------------------
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-chats = st.session_state.chats
-chat = chats[st.session_state.current_chat]
+# -------------------------------
+# Session state
+# -------------------------------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# --- Sidebar (chat list) ---
-st.sidebar.title("💬 Mehnitavi")
-for i, c in enumerate(chats):
-    if st.sidebar.button(c["title"], key=f"chat_{i}"):
-        st.session_state.current_chat = i
-        st.rerun()
-if st.sidebar.button("➕ New Chat"):
-    chats.append({"title": "New Chat", "messages": []})
-    st.session_state.current_chat = len(chats) - 1
-    st.rerun()
+if "edit_mode" not in st.session_state:
+    st.session_state.edit_mode = None
 
-# --- Chat Display ---
-st.title("🤖 Mehnitavi")
+# -------------------------------
+# Helper: read uploaded files
+# -------------------------------
+def read_file(uploaded_file):
+    if uploaded_file is None:
+        return None
 
-for msg in chat["messages"]:
-    with st.chat_message("user" if msg["role"] == "user" else "assistant"):
-        if msg.get("type") == "image":
-            st.image(msg["content"], caption=msg.get("filename", "Uploaded image"))
-        else:
-            st.markdown(msg["content"])
-        if msg["role"] == "user":  # ✅ Only user's messages editable
-            if st.button("✏️ Edit", key=f"edit_{msg['id']}"):
-                new_text = st.text_area("Edit message:", value=msg["content"], key=f"edit_text_{msg['id']}")
-                if st.button("Save", key=f"save_{msg['id']}"):
-                    msg["content"] = new_text
+    # PDFs
+    if uploaded_file.type == "application/pdf":
+        reader = PdfReader(uploaded_file)
+        return "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
+
+    # Excel
+    elif uploaded_file.type in [
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ]:
+        df = pd.read_excel(uploaded_file)
+        return df.to_string()
+
+    # Word
+    elif uploaded_file.type in [
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+    ]:
+        doc = docx.Document(uploaded_file)
+        return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
+
+    # Images (basic handling)
+    elif uploaded_file.type.startswith("image/"):
+        return f"[Image uploaded: {uploaded_file.name}]"
+
+    # Text
+    else:
+        return uploaded_file.read().decode("utf-8", errors="ignore")
+
+# -------------------------------
+# Display chat history
+# -------------------------------
+for idx, msg in enumerate(st.session_state.messages):
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+        if msg["role"] == "user":
+            if st.session_state.edit_mode == idx:
+                new_text = st.text_area("✏️ Edit message:", msg["content"], key=f"edit_{idx}")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("✅ Save", key=f"save_{idx}"):
+                        st.session_state.messages[idx]["content"] = new_text
+                        st.session_state.edit_mode = None
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Cancel", key=f"cancel_{idx}"):
+                        st.session_state.edit_mode = None
+                        st.rerun()
+            else:
+                if st.button("✏️ Edit", key=f"edit_btn_{idx}"):
+                    st.session_state.edit_mode = idx
                     st.rerun()
 
-# --- Input + File Upload Row ---
+# -------------------------------
+# Input area (chat + upload)
+# -------------------------------
 col1, col2 = st.columns([8, 1])
+
 with col1:
-    user_input = st.chat_input("Type your message...")
+    prompt = st.chat_input("Type your message here...")
+
 with col2:
-    uploaded_files = st.file_uploader("➕", type=None, accept_multiple_files=True, label_visibility="collapsed")
+    uploaded_file = st.file_uploader("➕", type=["pdf", "docx", "doc", "xlsx", "xls", "txt", "png", "jpg", "jpeg"],
+                                     label_visibility="collapsed")
 
-# --- Handle text input ---
-if user_input:
-    chat["messages"].append({"role": "user", "content": user_input, "id": _uid(), "type": "text"})
+if uploaded_file is not None:
+    file_content = read_file(uploaded_file)
+    if file_content:
+        st.session_state.messages.append({"role": "user", "content": f"Uploaded file content:\n{file_content}"})
+        with st.chat_message("user"):
+            st.markdown(f"📂 Uploaded **{uploaded_file.name}**")
 
+# -------------------------------
+# Handle prompt
+# -------------------------------
+if prompt:
+    # Save user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Call Groq API
     try:
-        completion = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="llama3-8b-8192",
-            messages=[{"role": m["role"], "content": m["content"]} for m in chat["messages"] if m["type"] == "text"]
+            messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
         )
-        bot_reply = completion.choices[0].message.content
+        reply = response.choices[0].message.content
+
     except Exception as e:
-        bot_reply = f"⚠️ Error: {str(e)}"
+        reply = f"⚠️ Error: {e}"
 
-    chat["messages"].append({"role": "assistant", "content": bot_reply, "id": _uid(), "type": "text"})
-    st.rerun()
-
-# --- Handle file uploads ---
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        content = ""
-        msg_type = "text"
-
-        # PDFs
-        if uploaded_file.type == "application/pdf":
-            reader = PdfReader(uploaded_file)
-            content = "\n".join([page.extract_text() or "" for page in reader.pages])
-
-        # Word
-        elif uploaded_file.type in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                    "application/msword"]:
-            doc = Document(uploaded_file)
-            content = "\n".join([p.text for p in doc.paragraphs])
-
-        # Excel
-        elif uploaded_file.type in ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    "application/vnd.ms-excel"]:
-            df = pd.read_excel(uploaded_file)
-            content = df.to_string()
-
-        # PowerPoint
-        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-            prs = Presentation(uploaded_file)
-            slides = []
-            for slide in prs.slides:
-                texts = []
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        texts.append(shape.text)
-                slides.append("\n".join(texts))
-            content = "\n\n".join(slides)
-
-        # Text, CSV, JSON, MD, logs
-        elif uploaded_file.type.startswith("text/") or uploaded_file.name.endswith((".txt", ".csv", ".json", ".log", ".md")):
-            content = uploaded_file.read().decode("utf-8")
-
-        # Images
-        elif uploaded_file.type.startswith("image/"):
-            content = uploaded_file
-            msg_type = "image"
-
-        # Other files
-        else:
-            content = f"📎 Uploaded file: {uploaded_file.name} ({uploaded_file.size/1024:.1f} KB)"
-
-        chat["messages"].append({
-            "role": "user",
-            "content": content,
-            "id": _uid(),
-            "type": msg_type,
-            "filename": uploaded_file.name
-        })
-
-    st.rerun()
+    # Save assistant reply
+    st.session_state.messages.append({"role": "assistant", "content": reply})
+    with st.chat_message("assistant"):
+        st.markdown(reply)
