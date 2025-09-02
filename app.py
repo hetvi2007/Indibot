@@ -2,7 +2,6 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
 import pandas as pd
-import os
 
 # -------------------
 # Page Config
@@ -81,20 +80,26 @@ def render_messages():
 # -------------------
 st.title("🤖 Mehnitavi - AI Chatbot")
 
-# File Upload (via + button in chat input area)
-uploaded_file = st.file_uploader("➕ Upload a file (PDF, DOCX, XLSX, TXT)", type=["pdf", "docx", "doc", "xlsx", "xls", "txt"])
-
-if uploaded_file:
-    file_text = process_file(uploaded_file)
-    st.session_state.messages.append({"role": "user", "content": f"📄 Uploaded file: {uploaded_file.name}"})
-    st.session_state.messages.append({"role": "assistant", "content": f"Here’s the extracted content:\n\n{text}"})
-
 # Render previous messages
 render_messages()
 
-# Chat input
-if prompt := st.chat_input("Type your message..."):
+# Chat input with file upload option
+col1, col2 = st.columns([0.15, 0.85])
+with col1:
+    uploaded_file = st.file_uploader("", type=["pdf", "docx", "doc", "xlsx", "xls", "txt"], label_visibility="collapsed")
+with col2:
+    prompt = st.chat_input("Type your message...")
+
+# Handle uploaded file
+if uploaded_file:
+    file_text = process_file(uploaded_file)
+    st.session_state.messages.append({"role": "user", "content": f"📄 Uploaded file: {uploaded_file.name}"})
+    st.session_state.messages.append({"role": "assistant", "content": f"Here’s the extracted content:\n\n{file_text}"})
+    st.rerun()
+
+# Handle text input
+if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
-    # Dummy bot response
+    # Dummy bot response (replace with real model later)
     st.session_state.messages.append({"role": "assistant", "content": f"You said: {prompt}"})
     st.rerun()
