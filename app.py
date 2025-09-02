@@ -1,212 +1,131 @@
 import streamlit as st
-from datetime import datetime
-import uuid
-import os
 from groq import Groq
+import uuid
 from PyPDF2 import PdfReader
+from docx import Document
+import pandas as pd
+from pptx import Presentation
 
-# ---------- Setup ----------
-st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
+# --- Groq API Client ---
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# Initialize Groq client
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-
-# ---------- Session Store ----------
+# --- Generate unique IDs for messages ---
 def _uid():
-    return uuid.uuid4().hex[:8]
+    return str(uuid.uuid4())[:8]
 
-store = st.session_state.setdefault("store", {"active": {}, "archived": {}})
-current_id = st.session_state.setdefault("current_id", None)
+# --- Initialize session state ---
+if "chats" not in st.session_state:
+    st.session_state.chats = [{"title": "New Chat", "messages": []}]
+if "current_chat" not in st.session_state:
+    st.session_state.current_chat = 0
 
-# ---------- Helpers ----------
-def new_chat():
-    cid = _uid()
-    store["active"][cid] = {
-        "title": "New Chat",
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "messages": []
-    }
-    st.session_state.current_id = cid
+chats = st.session_state.chats
+chat = chats[st.session_state.current_chat]
 
-def open_chat(cid):
-    st.session_state.current_id = cid
+# --- Sidebar (chat list) ---
+st.sidebar.title("💬 Mehnitavi")
+for i, c in enumerate(chats):
+    if st.sidebar.button(c["title"], key=f"chat_{i}"):
+        st.session_state.current_chat = i
+        st.rerun()
+if st.sidebar.button("➕ New Chat"):
+    chats.append({"title": "New Chat", "messages": []})
+    st.session_state.current_chat = len(chats) - 1
+    st.rerun()
 
-def rename_chat(cid, new_title, bucket="active"):
-    if new_title.strip():
-        store[bucket][cid]["title"] = new_title.strip()
-
-def delete_chat(cid, bucket="active"):
-    store[bucket].pop(cid, None)
-    if bucket == "active" and st.session_state.current_id == cid:
-        st.session_state.current_id = None
-
-def archive_chat(cid):
-    store["archived"][cid] = store["active"].pop(cid)
-    if st.session_state.current_id == cid:
-        st.session_state.current_id = None
-
-def restore_chat(cid):
-    store["active"][cid] = store["archived"].pop(cid)
-
-def export_text(cid, bucket="active"):
-    chat = store[bucket][cid]
-    lines = [f"Title: {chat['title']}", f"Created: {chat['created_at']}", "-"*40]
-    for m in chat["messages"]:
-        lines.append(f"{m['role'].capitalize()}: {m['content']}")
-    return "\n".join(lines)
-
-def autotitle_if_needed(cid):
-    chat = store["active"][cid]
-    if chat["title"] == "New Chat":
-        for m in chat["messages"]:
-            if m["role"] == "user" and m["content"].strip():
-                chat["title"] = m["content"].strip()[:40]
-                break
-
-# ---------- Sidebar ----------
-with st.sidebar:
-    st.header("Options")
-    st.button("✍️ New chat", use_container_width=True, on_click=new_chat)
-
-    st.markdown("---")
-    st.subheader("Chats")
-
-    # Active chats
-    if not store["active"]:
-        st.caption("No chats yet. Start one!")
-    else:
-        for cid, chat in list(store["active"].items())[::-1]:
-            c1, c2 = st.columns([0.8, 0.2])
-            if c1.button(chat["title"] or "Untitled", key=f"open_{cid}", use_container_width=True):
-                open_chat(cid)
-            with c2:
-                with st.popover("⋮"):
-                    new_name = st.text_input("Rename", value=chat["title"], key=f"rn_{cid}")
-                    if st.button("💾 Save name", key=f"rns_{cid}"):
-                        rename_chat(cid, new_name, bucket="active")
-                    st.download_button(
-                        "⬇️ Download (.txt)",
-                        data=export_text(cid, bucket="active"),
-                        file_name=f"{(chat['title'] or 'chat')}.txt",
-                        key=f"dl_{cid}",
-                        use_container_width=True,
-                    )
-                    if st.button("📦 Archive", key=f"arc_{cid}"):
-                        archive_chat(cid)
-                    if st.button("🗑️ Delete", key=f"del_{cid}"):
-                        delete_chat(cid, bucket="active")
-
-    # Archived chats
-    if store["archived"]:
-        with st.expander("🗂️ Library"):
-            for cid, chat in list(store["archived"].items())[::-1]:
-                c1, c2 = st.columns([0.8, 0.2])
-                c1.write(f"📄 {chat['title'] or 'Untitled'}")
-                with c2:
-                    with st.popover("⋮"):
-                        new_name = st.text_input("Rename", value=chat["title"], key=f"arn_{cid}")
-                        if st.button("💾 Save name", key=f"arns_{cid}"):
-                            rename_chat(cid, new_name, bucket="archived")
-                        st.download_button(
-                            "⬇️ Download (.txt)",
-                            data=export_text(cid, bucket="archived"),
-                            file_name=f"{(chat['title'] or 'chat')}.txt",
-                            key=f"adl_{cid}",
-                            use_container_width=True,
-                        )
-                        if st.button("↩️ Restore", key=f"res_{cid}"):
-                            restore_chat(cid)
-                        if st.button("🗑️ Delete", key=f"adel_{cid}"):
-                            delete_chat(cid, bucket="archived")
-
-# ---------- Main Area ----------
+# --- Chat Display ---
 st.title("🤖 Mehnitavi")
 
-if current_id and current_id in store["active"]:
-    chat = store["active"][current_id]
-
-    # render messages
-    for idx, msg in enumerate(chat["messages"]):
-        # ensure id exists
-        if "id" not in msg:
-            msg["id"] = _uid()
-            chat["messages"][idx] = msg
-
-        role = msg["role"]
-        with st.chat_message(role):
+for msg in chat["messages"]:
+    with st.chat_message("user" if msg["role"] == "user" else "assistant"):
+        if msg.get("type") == "image":
+            st.image(msg["content"], caption=msg.get("filename", "Uploaded image"))
+        else:
             st.markdown(msg["content"])
+        if msg["role"] == "user":  # ✅ Only user's messages editable
+            if st.button("✏️ Edit", key=f"edit_{msg['id']}"):
+                new_text = st.text_area("Edit message:", value=msg["content"], key=f"edit_text_{msg['id']}")
+                if st.button("Save", key=f"save_{msg['id']}"):
+                    msg["content"] = new_text
+                    st.rerun()
 
-            # Only allow editing/copying user messages
-            if role == "user":
-                col1, col2, col3 = st.columns([1,1,1])
-                with col1:
-                    if st.button("✏️ Edit", key=f"edit_{msg['id']}"):
-                        new_text = st.text_area("Edit your message:", value=msg["content"], key=f"edit_area_{msg['id']}")
-                        if st.button("💾 Save", key=f"save_{msg['id']}"):
-                            chat["messages"][idx]["content"] = new_text
-                            st.rerun()
-                with col2:
-                    if st.button("📋 Copy", key=f"copy_{msg['id']}"):
-                        st.toast("Copied! (use Ctrl+C from text area)")
-                        st.code(msg["content"])
-                with col3:
-                    if st.button("🔄 Regenerate", key=f"regen_{msg['id']}"):
-                        try:
-                            response = client.chat.completions.create(
-                                model="llama-3.1-8b-instant",
-                                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
-                                         + chat["messages"][:idx+1],
-                            )
-                            reply = response.choices[0].message.content
-                        except Exception as e:
-                            reply = f"⚠️ Error: {e}"
-                        chat["messages"].append({"role": "assistant", "content": reply, "id": _uid()})
-                        st.rerun()
+# --- Input + File Upload Row ---
+col1, col2 = st.columns([8, 1])
+with col1:
+    user_input = st.chat_input("Type your message...")
+with col2:
+    uploaded_files = st.file_uploader("➕", type=None, accept_multiple_files=True, label_visibility="collapsed")
 
-    # --- Input methods ---
-    c1, c2 = st.columns([3, 1])
+# --- Handle text input ---
+if user_input:
+    chat["messages"].append({"role": "user", "content": user_input, "id": _uid(), "type": "text"})
 
-    with c1:
-        text = st.chat_input("Ask Mehnitavi something…")
-
-    with c2:
-        uploaded_file = st.file_uploader(
-            "📎",
-            type=["png", "jpg", "jpeg", "pdf", "txt"],
-            label_visibility="collapsed"
+    try:
+        completion = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[{"role": m["role"], "content": m["content"]} for m in chat["messages"] if m["type"] == "text"]
         )
+        bot_reply = completion.choices[0].message.content
+    except Exception as e:
+        bot_reply = f"⚠️ Error: {str(e)}"
 
-    # Handle text input
-    if text:
-        chat["messages"].append({"role": "user", "content": text, "id": _uid()})
+    chat["messages"].append({"role": "assistant", "content": bot_reply, "id": _uid(), "type": "text"})
+    st.rerun()
 
-    # Handle file input
-    if uploaded_file:
+# --- Handle file uploads ---
+if uploaded_files:
+    for uploaded_file in uploaded_files:
         content = ""
+        msg_type = "text"
+
+        # PDFs
         if uploaded_file.type == "application/pdf":
             reader = PdfReader(uploaded_file)
             content = "\n".join([page.extract_text() or "" for page in reader.pages])
-        elif uploaded_file.type.startswith("text/"):
+
+        # Word
+        elif uploaded_file.type in ["application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                    "application/msword"]:
+            doc = Document(uploaded_file)
+            content = "\n".join([p.text for p in doc.paragraphs])
+
+        # Excel
+        elif uploaded_file.type in ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    "application/vnd.ms-excel"]:
+            df = pd.read_excel(uploaded_file)
+            content = df.to_string()
+
+        # PowerPoint
+        elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+            prs = Presentation(uploaded_file)
+            slides = []
+            for slide in prs.slides:
+                texts = []
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        texts.append(shape.text)
+                slides.append("\n".join(texts))
+            content = "\n\n".join(slides)
+
+        # Text, CSV, JSON, MD, logs
+        elif uploaded_file.type.startswith("text/") or uploaded_file.name.endswith((".txt", ".csv", ".json", ".log", ".md")):
             content = uploaded_file.read().decode("utf-8")
+
+        # Images
+        elif uploaded_file.type.startswith("image/"):
+            content = uploaded_file
+            msg_type = "image"
+
+        # Other files
         else:
-            content = f"📎 Uploaded file: {uploaded_file.name}"
+            content = f"📎 Uploaded file: {uploaded_file.name} ({uploaded_file.size/1024:.1f} KB)"
 
-        chat["messages"].append({"role": "user", "content": content, "id": _uid()})
+        chat["messages"].append({
+            "role": "user",
+            "content": content,
+            "id": _uid(),
+            "type": msg_type,
+            "filename": uploaded_file.name
+        })
 
-    # If any user input was given, get reply
-    if text or uploaded_file:
-        try:
-            response = client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=[{"role": "system", "content": "You are Mehnitavi, a helpful assistant."}]
-                         + chat["messages"],
-            )
-            reply = response.choices[0].message.content
-        except Exception as e:
-            reply = f"⚠️ Error talking to Mehnitavi: {e}"
-
-        chat["messages"].append({"role": "assistant", "content": reply, "id": _uid()})
-        autotitle_if_needed(current_id)
-        st.rerun()
-else:
-    st.info("Start a new chat from the sidebar.")
+    st.rerun()
