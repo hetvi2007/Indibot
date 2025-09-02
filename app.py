@@ -60,15 +60,6 @@ def autotitle_if_needed(cid):
                 chat["title"] = m["content"].strip()[:40]
                 break
 
-def extract_text_from_file(uploaded_file):
-    if uploaded_file.type == "application/pdf":
-        pdf = PdfReader(uploaded_file)
-        return "\n".join([page.extract_text() for page in pdf.pages if page.extract_text()])
-    elif uploaded_file.type.startswith("text/"):
-        return uploaded_file.read().decode("utf-8", errors="ignore")
-    else:
-        return f"📎 Uploaded file: {uploaded_file.name}"
-
 # ---------- Sidebar ----------
 with st.sidebar:
     st.header("Options")
@@ -132,9 +123,18 @@ if current_id and current_id in store["active"]:
     chat = store["active"][current_id]
 
     # show messages
-    for m in chat["messages"]:
+    for i, m in enumerate(chat["messages"]):
         with st.chat_message("user" if m["role"] == "user" else "assistant"):
             st.write(m["content"])
+            if m["role"] == "assistant":
+                cc1, cc2 = st.columns([0.15, 0.15])
+                with cc1:
+                    st.code(m["content"], language="markdown")
+                with cc2:
+                    new_text = st.text_area("✏️ Edit reply", m["content"], key=f"edit_{i}")
+                    if st.button("💾 Save edit", key=f"save_{i}"):
+                        chat["messages"][i]["content"] = new_text
+                        st.rerun()
 
     # --- Input methods ---
     c1, c2 = st.columns([3, 1])
@@ -155,7 +155,15 @@ if current_id and current_id in store["active"]:
 
     # Handle file input
     if uploaded_file:
-        file_content = extract_text_from_file(uploaded_file)
+        file_content = None
+        if uploaded_file.type == "application/pdf":
+            pdf_reader = PdfReader(uploaded_file)
+            file_content = "\n".join([page.extract_text() for page in pdf_reader.pages if page.extract_text()])
+        elif uploaded_file.type.startswith("text/"):
+            file_content = uploaded_file.read().decode("utf-8")
+        else:
+            file_content = f"📎 Uploaded file: {uploaded_file.name}"
+
         chat["messages"].append({"role": "user", "content": file_content})
 
     # If any user input was given, get reply
@@ -175,3 +183,4 @@ if current_id and current_id in store["active"]:
         st.rerun()
 else:
     st.info("Start a new chat from the sidebar.")
+
