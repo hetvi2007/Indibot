@@ -1,138 +1,107 @@
 import streamlit as st
-import os
-from groq import Groq
-import tempfile
-from PyPDF2 import PdfReader
 import pandas as pd
-import docx
+import PyPDF2
+from docx import Document
+from groq import Groq
+from PIL import Image
+import io
 
-# -------------------------------
-# Page config
-# -------------------------------
+# -------------------
+# Page Config
+# -------------------
 st.set_page_config(page_title="Mehnitavi", page_icon="🤖", layout="wide")
 
-# -------------------------------
-# Sidebar branding
-# -------------------------------
-with st.sidebar:
-    st.image("robot.png", width=100)  # Make sure robot.png is in your repo
-    st.title("Mehnitavi")
+# Initialize Groq client
+client = Groq(api_key=st.secrets["GROQ_API_KEY"])
 
-# -------------------------------
-# Groq client setup
-# -------------------------------
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# -------------------
+# Sidebar
+# -------------------
+st.sidebar.image("robot.png", width=100)
+st.sidebar.title("Mehnitavi 🤖")
+st.sidebar.write("Your AI Assistant")
 
-# -------------------------------
-# Session state
-# -------------------------------
+# -------------------
+# Session State
+# -------------------
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state["messages"] = []
 
-if "edit_mode" not in st.session_state:
-    st.session_state.edit_mode = None
-
-# -------------------------------
-# Helper: read uploaded files
-# -------------------------------
+# -------------------
+# Helper: Read uploaded files
+# -------------------
 def read_file(uploaded_file):
-    if uploaded_file is None:
-        return None
-
-    # PDFs
     if uploaded_file.type == "application/pdf":
-        reader = PdfReader(uploaded_file)
+        reader = PyPDF2.PdfReader(uploaded_file)
         return "\n".join([page.extract_text() for page in reader.pages if page.extract_text()])
-
-    # Excel
-    elif uploaded_file.type in [
-        "application/vnd.ms-excel",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ]:
-        df = pd.read_excel(uploaded_file)
-        return df.to_string()
-
-    # Word
+    
     elif uploaded_file.type in [
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/msword",
     ]:
-        doc = docx.Document(uploaded_file)
+        doc = Document(uploaded_file)
         return "\n".join([p.text for p in doc.paragraphs if p.text.strip()])
-
-    # Images (basic handling)
+    
+    elif uploaded_file.type in [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    ]:
+        df = pd.read_excel(uploaded_file)
+        return df.to_string()
+    
     elif uploaded_file.type.startswith("image/"):
-        return f"[Image uploaded: {uploaded_file.name}]"
-
-    # Text
+        image = Image.open(uploaded_file)
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return "📷 Image uploaded successfully (content not extracted as text)."
+    
     else:
         return uploaded_file.read().decode("utf-8", errors="ignore")
 
-# -------------------------------
-# Display chat history
-# -------------------------------
-for idx, msg in enumerate(st.session_state.messages):
+# -------------------
+# Chat UI
+# -------------------
+st.title("💬 Mehnitavi")
+
+# Show past messages
+for msg in st.session_state["messages"]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-        if msg["role"] == "user":
-            if st.session_state.edit_mode == idx:
-                new_text = st.text_area("✏️ Edit message:", msg["content"], key=f"edit_{idx}")
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("✅ Save", key=f"save_{idx}"):
-                        st.session_state.messages[idx]["content"] = new_text
-                        st.session_state.edit_mode = None
-                        st.rerun()
-                with col2:
-                    if st.button("❌ Cancel", key=f"cancel_{idx}"):
-                        st.session_state.edit_mode = None
-                        st.rerun()
-            else:
-                if st.button("✏️ Edit", key=f"edit_btn_{idx}"):
-                    st.session_state.edit_mode = idx
-                    st.rerun()
+# Input area
+user_input = st.chat_input("Type your message here...")
 
-# -------------------------------
-# Input area (chat + upload)
-# -------------------------------
-col1, col2 = st.columns([8, 1])
+# File uploader button
+uploaded_file = st.file_uploader("➕ Upload a file", type=None, label_visibility="collapsed")
 
-with col1:
-    prompt = st.chat_input("Type your message here...")
-
-with col2:
-    uploaded_file = st.file_uploader("➕", type=["pdf", "docx", "doc", "xlsx", "xls", "txt", "png", "jpg", "jpeg"],
-                                     label_visibility="collapsed")
-
-if uploaded_file is not None:
-    file_content = read_file(uploaded_file)
-    if file_content:
-        st.session_state.messages.append({"role": "user", "content": f"Uploaded file content:\n{file_content}"})
-        with st.chat_message("user"):
-            st.markdown(f"📂 Uploaded **{uploaded_file.name}**")
-
-# -------------------------------
-# Handle prompt
-# -------------------------------
-if prompt:
-    # Save user message
-    st.session_state.messages.append({"role": "user", "content": prompt})
+if uploaded_file:
+    file_text = read_file(uploaded_file)
+    st.session_state["messages"].append({"role": "user", "content": f"📎 Uploaded file:\n{file_text}"})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(f"📎 Uploaded file:\n{file_text}")
 
-    # Call Groq API
-    try:
-        response = client.chat.completions.create(
-            model="llama3-8b-8192",
-            messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages],
-        )
-        reply = response.choices[0].message.content
+# Handle chat input
+if user_input:
+    st.session_state["messages"].append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-    except Exception as e:
-        reply = f"⚠️ Error: {e}"
-
-    # Save assistant reply
-    st.session_state.messages.append({"role": "assistant", "content": reply})
     with st.chat_message("assistant"):
-        st.markdown(reply)
+        message_placeholder = st.empty()
+        full_response = ""
+
+        try:
+            response = client.chat.completions.create(
+                model="llama3-8b-8192",
+                messages=st.session_state["messages"],
+                stream=True,
+            )
+            for chunk in response:
+                delta = chunk.choices[0].delta.content or ""
+                full_response += delta
+                message_placeholder.markdown(full_response + "▌")
+        except Exception as e:
+            full_response = f"⚠️ Error: {str(e)}"
+
+        message_placeholder.markdown(full_response)
+    st.session_state["messages"].append({"role": "assistant", "content": full_response})
