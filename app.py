@@ -2,29 +2,42 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
 import pandas as pd
+from groq import Groq
+import os
 
 # -------------------
 # Page Config
 # -------------------
 st.set_page_config(
-    page_title="Mehnitavi",
+    page_title="Mehnitavi - AI Chatbot",
     page_icon="🤖",
     layout="wide"
 )
 
 # -------------------
+# Setup Groq Client
+# -------------------
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
+
+if not GROQ_API_KEY:
+    st.error("❌ Missing API key. Please set `GROQ_API_KEY` in your `.streamlit/secrets.toml` or environment.")
+    st.stop()
+
+client = Groq(api_key=GROQ_API_KEY)
+
+# -------------------
 # Sidebar
 # -------------------
-st.sidebar.markdown("### 🤖 Mehnitavi")
-st.sidebar.write("Your AI Assistant")
+st.sidebar.markdown("### ⚙️ Options")
+st.sidebar.write("🤖 Mehnitavi AI Assistant")
+theme = st.sidebar.radio("Theme", ["Light", "Dark"])
 
 # -------------------
 # Session State Setup
 # -------------------
 if "messages" not in st.session_state:
-    # Start fresh with greeting
     st.session_state.messages = [
-        {"role": "assistant", "content": "👋 Hello — I’m Mehnitavi. Ask me anything about technology, science, history, or upload files for me to read."}
+        {"role": "assistant", "content": "👋 Hello — I’m Mehnitavi. Ask me anything or upload files for me to read."}
     ]
 if "edit_mode" not in st.session_state:
     st.session_state.edit_mode = {}
@@ -37,21 +50,24 @@ def process_file(uploaded_file):
     text = ""
     file_type = uploaded_file.name.split(".")[-1].lower()
 
-    if file_type == "pdf":
-        pdf_reader = PdfReader(uploaded_file)
-        for page in pdf_reader.pages:
-            text += page.extract_text() or ""
-    elif file_type in ["docx", "doc"]:
-        doc = Document(uploaded_file)
-        for para in doc.paragraphs:
-            text += para.text + "\n"
-    elif file_type in ["xls", "xlsx"]:
-        df = pd.read_excel(uploaded_file)
-        text = df.to_string()
-    elif file_type == "txt":
-        text = uploaded_file.read().decode("utf-8")
-    else:
-        text = f"⚠️ Unsupported file type: {file_type}"
+    try:
+        if file_type == "pdf":
+            pdf_reader = PdfReader(uploaded_file)
+            for page in pdf_reader.pages:
+                text += page.extract_text() or ""
+        elif file_type in ["docx", "doc"]:
+            doc = Document(uploaded_file)
+            for para in doc.paragraphs:
+                text += para.text + "\n"
+        elif file_type in ["xls", "xlsx"]:
+            df = pd.read_excel(uploaded_file)
+            text = df.to_string()
+        elif file_type == "txt":
+            text = uploaded_file.read().decode("utf-8")
+        else:
+            text = f"⚠️ Unsupported file type: {file_type}"
+    except Exception as e:
+        text = f"❌ Error reading file: {e}"
 
     return text
 
@@ -73,7 +89,7 @@ def render_messages():
                     st.rerun()
             else:
                 st.markdown(msg["content"])
-                if is_user:  # edit button only for user messages
+                if is_user:
                     if st.button("✏️ Edit", key=f"edit_btn_{i}"):
                         st.session_state.edit_mode[i] = True
                         st.rerun()
@@ -86,7 +102,7 @@ st.title("🤖 Mehnitavi - AI Chatbot")
 # Render previous messages
 render_messages()
 
-# Chat input with file upload option (like ChatGPT style)
+# Input row (ChatGPT style: file upload + text input)
 col1, col2 = st.columns([0.15, 0.85])
 with col1:
     uploaded_file = st.file_uploader("", type=["pdf", "docx", "doc", "xlsx", "xls", "txt"], label_visibility="collapsed")
@@ -103,38 +119,21 @@ if uploaded_file:
     st.rerun()
 
 # -------------------
-# Handle Text Input (Rule-based Knowledge Brain)
+# Handle Text Input with Groq AI
 # -------------------
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # -------------------
-    # Knowledge Brain
-    # -------------------
-    knowledge_base = {
-        "computer languages": "💡 Computers have hundreds of programming languages like Python, Java, C++, JavaScript, Ruby, Go, etc.",
-        "programming": "💻 Programming is the process of creating instructions that a computer can follow.",
-        "python": "🐍 Python is a versatile programming language used for AI, web apps, data science, and more.",
-        "java": "☕ Java is a popular language used for enterprise apps, Android development, and backend systems.",
-        "history": "📜 History is the study of past events. Do you want me to tell you about world history or Indian history?",
-        "science": "🔬 Science helps us understand the world through observation, experiments, and reasoning.",
-        "geography": "🌍 Geography is the study of Earth, its features, and its people. Do you want to learn about countries, maps, or nature?",
-        "ai": "🤖 Artificial Intelligence (AI) is the simulation of human intelligence in machines.",
-        "robot": "🦾 Robots are machines designed to perform tasks, sometimes mimicking human actions."
-    }
-
-    reply = None
-    for keyword, answer in knowledge_base.items():
-        if keyword in prompt.lower():
-            reply = answer
-            break
-
-    # If nothing matches, fallback
-    if not reply:
-        if "hello" in prompt.lower() or "hi" in prompt.lower():
-            reply = "👋 Hi! How can I help you today?"
-        else:
-            reply = f"🤔 I don’t know this yet, but I can learn! You asked: {prompt}"
+    try:
+        completion = client.chat.completions.create(
+            model="llama3-8b-8192",
+            messages=[
+                {"role": "system", "content": "You are Mehnitavi, a helpful AI assistant."}
+            ] + [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+        )
+        reply = completion.choices[0].message["content"]
+    except Exception as e:
+        reply = f"❌ Error: {e}"
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
     st.rerun()
