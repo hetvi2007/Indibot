@@ -2,8 +2,6 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
 import pandas as pd
-import uuid
-from datetime import datetime
 
 # -------------------
 # Page Config
@@ -21,28 +19,15 @@ st.sidebar.markdown("### 🤖 Mehnitavi")
 st.sidebar.write("Your AI Assistant")
 
 # -------------------
-# Utilities
-# -------------------
-def _uid():
-    """Generate unique id"""
-    return str(uuid.uuid4())[:8]
-
-# -------------------
 # Session State Setup
 # -------------------
-if "chats" not in st.session_state:
-    st.session_state.chats = [{
-        "id": _uid(),
-        "title": "New Chat",
-        "created_at": datetime.now().isoformat(),
-        "messages": [],
-        "files": []
-    }]
-    st.session_state.current = 0
+if "messages" not in st.session_state:
+    # Start fresh with greeting
+    st.session_state.messages = [
+        {"role": "assistant", "content": "👋 Hello — I’m Mehnitavi. Ask me anything about technology, science, history, or upload files for me to read."}
+    ]
 if "edit_mode" not in st.session_state:
     st.session_state.edit_mode = {}
-if "edit_buffer" not in st.session_state:
-    st.session_state.edit_buffer = {}
 
 # -------------------
 # File Processing
@@ -74,56 +59,29 @@ def process_file(uploaded_file):
 # Chat Rendering
 # -------------------
 def render_messages():
-    chat = st.session_state.chats[st.session_state.current]
-    for i, msg in enumerate(chat["messages"]):
+    for i, msg in enumerate(st.session_state.messages):
         is_user = msg["role"] == "user"
         with st.chat_message("user" if is_user else "assistant"):
-            if st.session_state.edit_mode.get(msg["id"], False) and is_user:
-                new_text = st.text_area(
-                    "Edit your message:",
-                    st.session_state.edit_buffer.get(msg["id"], msg["content"]),
-                    key=f"edit_box_{msg['id']}"
-                )
-                if st.button("Save", key=f"save_btn_{msg['id']}"):
-                    msg["content"] = new_text
-                    st.session_state.edit_mode[msg["id"]] = False
-                    st.session_state.edit_buffer.pop(msg["id"], None)
-                    st.rerun()   # ✅ fixed
-                if st.button("Cancel", key=f"cancel_btn_{msg['id']}"):
-                    st.session_state.edit_mode[msg["id"]] = False
-                    st.session_state.edit_buffer.pop(msg["id"], None)
-                    st.rerun()   # ✅ fixed
+            if st.session_state.edit_mode.get(i, False) and is_user:
+                new_text = st.text_area("Edit your message:", msg["content"], key=f"edit_box_{i}")
+                if st.button("Save", key=f"save_btn_{i}"):
+                    st.session_state.messages[i]["content"] = new_text
+                    st.session_state.edit_mode[i] = False
+                    st.rerun()
+                if st.button("Cancel", key=f"cancel_btn_{i}"):
+                    st.session_state.edit_mode[i] = False
+                    st.rerun()
             else:
                 st.markdown(msg["content"])
                 if is_user:  # edit button only for user messages
-                    if st.button("✏️ Edit", key=f"edit_btn_{msg['id']}"):
-                        st.session_state.edit_mode[msg["id"]] = True
-                        st.session_state.edit_buffer[msg["id"]] = msg["content"]
-                        st.rerun()   # ✅ fixed
+                    if st.button("✏️ Edit", key=f"edit_btn_{i}"):
+                        st.session_state.edit_mode[i] = True
+                        st.rerun()
 
 # -------------------
 # Main App Layout
 # -------------------
 st.title("🤖 Mehnitavi - AI Chatbot")
-
-# Sidebar chat list
-with st.sidebar:
-    st.markdown("### 💬 Chats")
-    if st.button("➕ New Chat", use_container_width=True):
-        st.session_state.chats.append({
-            "id": _uid(),
-            "title": f"Chat {len(st.session_state.chats)+1}",
-            "created_at": datetime.now().isoformat(),
-            "messages": [],
-            "files": []
-        })
-        st.session_state.current = len(st.session_state.chats)-1
-        st.rerun()   # ✅ fixed
-
-    for idx, c in enumerate(st.session_state.chats):
-        if st.button(c["title"], key=f"open_{idx}", use_container_width=True):
-            st.session_state.current = idx
-            st.rerun()   # ✅ fixed
 
 # Render previous messages
 render_messages()
@@ -131,11 +89,7 @@ render_messages()
 # Chat input with file upload option (like ChatGPT style)
 col1, col2 = st.columns([0.15, 0.85])
 with col1:
-    uploaded_file = st.file_uploader(
-        "",
-        type=["pdf", "docx", "doc", "xlsx", "xls", "txt"],
-        label_visibility="collapsed"
-    )
+    uploaded_file = st.file_uploader("", type=["pdf", "docx", "doc", "xlsx", "xls", "txt"], label_visibility="collapsed")
 with col2:
     prompt = st.chat_input("Type your message...")
 
@@ -143,26 +97,44 @@ with col2:
 # Handle Uploaded File
 # -------------------
 if uploaded_file:
-    chat = st.session_state.chats[st.session_state.current]
     file_text = process_file(uploaded_file)
-    chat["messages"].append({"id": _uid(), "role": "user", "content": f"📄 Uploaded file: {uploaded_file.name}"})
-    chat["messages"].append({"id": _uid(), "role": "assistant", "content": f"Here’s the extracted content:\n\n{file_text}"})
-    st.rerun()   # ✅ fixed
+    st.session_state.messages.append({"role": "user", "content": f"📄 Uploaded file: {uploaded_file.name}"})
+    st.session_state.messages.append({"role": "assistant", "content": f"Here’s the extracted content:\n\n{file_text}"})
+    st.rerun()
 
 # -------------------
-# Handle Text Input
+# Handle Text Input (Rule-based Knowledge Brain)
 # -------------------
 if prompt:
-    chat = st.session_state.chats[st.session_state.current]
-    chat["messages"].append({"id": _uid(), "role": "user", "content": prompt})
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Dummy rule-based brain (expandable later)
-    if "language" in prompt.lower():
-        reply = "💡 Computers support hundreds of programming languages like Python, Java, C++, etc. Would you like me to list some?"
-    elif "hello" in prompt.lower() or "hi" in prompt.lower():
-        reply = "👋 Hi! How can I help you today?"
-    else:
-        reply = f"You said: {prompt}"
+    # -------------------
+    # Knowledge Brain
+    # -------------------
+    knowledge_base = {
+        "computer languages": "💡 Computers have hundreds of programming languages like Python, Java, C++, JavaScript, Ruby, Go, etc.",
+        "programming": "💻 Programming is the process of creating instructions that a computer can follow.",
+        "python": "🐍 Python is a versatile programming language used for AI, web apps, data science, and more.",
+        "java": "☕ Java is a popular language used for enterprise apps, Android development, and backend systems.",
+        "history": "📜 History is the study of past events. Do you want me to tell you about world history or Indian history?",
+        "science": "🔬 Science helps us understand the world through observation, experiments, and reasoning.",
+        "geography": "🌍 Geography is the study of Earth, its features, and its people. Do you want to learn about countries, maps, or nature?",
+        "ai": "🤖 Artificial Intelligence (AI) is the simulation of human intelligence in machines.",
+        "robot": "🦾 Robots are machines designed to perform tasks, sometimes mimicking human actions."
+    }
 
-    chat["messages"].append({"id": _uid(), "role": "assistant", "content": reply})
-    st.rerun()   # ✅ fixed
+    reply = None
+    for keyword, answer in knowledge_base.items():
+        if keyword in prompt.lower():
+            reply = answer
+            break
+
+    # If nothing matches, fallback
+    if not reply:
+        if "hello" in prompt.lower() or "hi" in prompt.lower():
+            reply = "👋 Hi! How can I help you today?"
+        else:
+            reply = f"🤔 I don’t know this yet, but I can learn! You asked: {prompt}"
+
+    st.session_state.messages.append({"role": "assistant", "content": reply})
+    st.rerun()
