@@ -2,8 +2,12 @@ import streamlit as st
 from PyPDF2 import PdfReader
 from docx import Document
 import pandas as pd
-from openai import OpenAI
 import os
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 # -------------------
 # Page Config
@@ -21,28 +25,29 @@ st.sidebar.markdown("### 🤖 Mehnitavi")
 st.sidebar.write("Your AI Assistant")
 
 # -------------------
-# OpenAI Setup
+# OpenAI Setup (safe)
 # -------------------
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
+client = None
+if api_key and OpenAI:
+    client = OpenAI(api_key=api_key)
 
 # -------------------
 # Session State Setup
 # -------------------
 if "messages" not in st.session_state:
-    # Start with setup question
     st.session_state.messages = [
-        {"role": "assistant", "content": "Question for you:\nDo you want me to connect this chatbot with OpenAI (GPT-like responses) so it answers anything smartly, or do you prefer to keep it rule-based for now?"}
+        {"role": "assistant", "content": "Question for you:\nDo you want me to connect this chatbot with OpenAI (GPT-like responses) so it answers smartly, or keep it rule-based for now?"}
     ]
 if "edit_mode" not in st.session_state:
     st.session_state.edit_mode = {}
 if "use_gpt" not in st.session_state:
-    st.session_state.use_gpt = None  # not decided yet
+    st.session_state.use_gpt = None
 
 # -------------------
 # File Processing
 # -------------------
 def process_file(uploaded_file):
-    """Extract text from PDF, Word, Excel, or TXT files."""
     text = ""
     file_type = uploaded_file.name.split(".")[-1].lower()
 
@@ -95,7 +100,7 @@ st.title("🤖 Mehnitavi - AI Chatbot")
 # Render previous messages
 render_messages()
 
-# Chat input with file upload option (like ChatGPT style)
+# Chat input with file upload option
 col1, col2 = st.columns([0.15, 0.85])
 with col1:
     uploaded_file = st.file_uploader("", type=["pdf", "docx", "doc", "xlsx", "xls", "txt"], label_visibility="collapsed")
@@ -117,26 +122,27 @@ if uploaded_file:
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Decide if GPT or Rule-based
     if st.session_state.use_gpt is None:
         if "gpt" in prompt.lower():
-            st.session_state.use_gpt = True
-            reply = "✅ Great! I’m now connected to OpenAI GPT and will give smart responses."
+            if client:
+                st.session_state.use_gpt = True
+                reply = "✅ Great! I’m now connected to OpenAI GPT and will give smart responses."
+            else:
+                st.session_state.use_gpt = False
+                reply = "⚠️ No OpenAI API key found. I’ll stay rule-based."
         elif "rule" in prompt.lower():
             st.session_state.use_gpt = False
             reply = "✅ Okay! I’ll stay rule-based with simple responses."
         else:
             reply = "Please confirm: type 'Use GPT' for smart answers or 'Rule-based' for simple replies."
     else:
-        if st.session_state.use_gpt:
-            # GPT response
+        if st.session_state.use_gpt and client:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=st.session_state.messages
             )
             reply = response.choices[0].message.content
         else:
-            # Rule-based echo
             reply = f"You said: {prompt}"
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
