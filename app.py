@@ -1,36 +1,53 @@
 import streamlit as st
+import os
+import json
+from datetime import datetime
+from groq import Groq
 from PyPDF2 import PdfReader
 from docx import Document
 import pandas as pd
-from groq import Groq
-import os
 
 # -------------------
 # Page Config
 # -------------------
 st.set_page_config(
-    page_title="Mehnitavi - AI Chatbot",
+    page_title="Mehnitavi",
     page_icon="🤖",
     layout="wide"
 )
 
 # -------------------
-# Setup Groq Client
+# Groq API Client
 # -------------------
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.environ.get("GROQ_API_KEY")
-
-if not GROQ_API_KEY:
-    st.error("❌ Missing API key. Please set `GROQ_API_KEY` in your `.streamlit/secrets.toml` or environment.")
-    st.stop()
-
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
 client = Groq(api_key=GROQ_API_KEY)
 
 # -------------------
 # Sidebar
 # -------------------
 st.sidebar.markdown("### ⚙️ Options")
-st.sidebar.write("🤖 Mehnitavi AI Assistant")
+st.sidebar.write("Mehnitavi AI Assistant")
+
+# Theme Selector
 theme = st.sidebar.radio("Theme", ["Light", "Dark"])
+
+# Apply Dark Mode via CSS
+if theme == "Dark":
+    st.markdown(
+        """
+        <style>
+        body, .stApp {
+            background-color: #1e1e1e;
+            color: white;
+        }
+        .stTextInput, .stTextArea, .stChatInput {
+            background-color: #2b2b2b;
+            color: white;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
 
 # -------------------
 # Session State Setup
@@ -50,24 +67,21 @@ def process_file(uploaded_file):
     text = ""
     file_type = uploaded_file.name.split(".")[-1].lower()
 
-    try:
-        if file_type == "pdf":
-            pdf_reader = PdfReader(uploaded_file)
-            for page in pdf_reader.pages:
-                text += page.extract_text() or ""
-        elif file_type in ["docx", "doc"]:
-            doc = Document(uploaded_file)
-            for para in doc.paragraphs:
-                text += para.text + "\n"
-        elif file_type in ["xls", "xlsx"]:
-            df = pd.read_excel(uploaded_file)
-            text = df.to_string()
-        elif file_type == "txt":
-            text = uploaded_file.read().decode("utf-8")
-        else:
-            text = f"⚠️ Unsupported file type: {file_type}"
-    except Exception as e:
-        text = f"❌ Error reading file: {e}"
+    if file_type == "pdf":
+        pdf_reader = PdfReader(uploaded_file)
+        for page in pdf_reader.pages:
+            text += page.extract_text() or ""
+    elif file_type in ["docx", "doc"]:
+        doc = Document(uploaded_file)
+        for para in doc.paragraphs:
+            text += para.text + "\n"
+    elif file_type in ["xls", "xlsx"]:
+        df = pd.read_excel(uploaded_file)
+        text = df.to_string()
+    elif file_type == "txt":
+        text = uploaded_file.read().decode("utf-8")
+    else:
+        text = f"⚠️ Unsupported file type: {file_type}"
 
     return text
 
@@ -89,7 +103,7 @@ def render_messages():
                     st.rerun()
             else:
                 st.markdown(msg["content"])
-                if is_user:
+                if is_user:  # edit button only for user messages
                     if st.button("✏️ Edit", key=f"edit_btn_{i}"):
                         st.session_state.edit_mode[i] = True
                         st.rerun()
@@ -102,7 +116,7 @@ st.title("🤖 Mehnitavi - AI Chatbot")
 # Render previous messages
 render_messages()
 
-# Input row (ChatGPT style: file upload + text input)
+# Chat input with file upload option
 col1, col2 = st.columns([0.15, 0.85])
 with col1:
     uploaded_file = st.file_uploader("", type=["pdf", "docx", "doc", "xlsx", "xls", "txt"], label_visibility="collapsed")
@@ -119,17 +133,15 @@ if uploaded_file:
     st.rerun()
 
 # -------------------
-# Handle Text Input with Groq AI
+# Handle Text Input (Groq AI Integration)
 # -------------------
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
 
     try:
         completion = client.chat.completions.create(
-            model="llama3-8b-8192",
-            messages=[
-                {"role": "system", "content": "You are Mehnitavi, a helpful AI assistant."}
-            ] + [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+            model="llama-3.1-70b-versatile",  # ✅ Updated model
+            messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
         )
         reply = completion.choices[0].message["content"]
     except Exception as e:
