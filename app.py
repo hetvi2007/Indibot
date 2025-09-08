@@ -1,6 +1,5 @@
 import streamlit as st
 import datetime
-import os
 
 # ---------------- Session State Setup ----------------
 if "chats" not in st.session_state:
@@ -59,24 +58,25 @@ if st.session_state.chats:
 st.title("🤖 Mehnitavi - AI Chatbot")
 st.write("👋 Hello — I’m Mehnitavi. Ask me anything about technology, science, history, or upload files for me to read.")
 
-if st.session_state.active_chat:
-    chat = st.session_state.chats[st.session_state.active_chat]
+# Auto-create first chat if none exists
+if not st.session_state.active_chat:
+    create_new_chat()
 
-    for msg in chat["messages"]:
-        if msg["role"] == "user":
-            st.markdown(f"**You:** {msg['content']}")
-        else:
-            st.markdown(f"**🤖 Mehnitavi:** {msg['content']}")
+chat = st.session_state.chats[st.session_state.active_chat]
 
-    user_input = st.text_input("Type your message...", key="chat_input")
+# Show chat history
+for msg in chat["messages"]:
+    with st.chat_message("user" if msg["role"] == "user" else "assistant"):
+        st.markdown(msg["content"])
 
-    if user_input:
-        add_message("user", user_input)
-        bot_reply = chatbot_reply(user_input)
-        add_message("bot", bot_reply)
-        st.experimental_rerun()
-else:
-    st.write("👉 Select or create a chat from the sidebar.")
+# ---------------- Chat Input (GPT-style) ----------------
+user_input = st.chat_input("Type your message here...")
+
+if user_input:
+    add_message("user", user_input)
+    bot_reply = chatbot_reply(user_input)
+    add_message("assistant", bot_reply)
+    st.experimental_rerun()
 
 # ---------------- File Upload ----------------
 st.subheader("📂 Upload a file")
