@@ -55,7 +55,7 @@ def process_file(uploaded_file):
 
     if file_type == "pdf":
         pdf_reader = PdfReader(uploaded_file)
-        for page in pdf_reader.pages[:3]:  # limit to 3 pages to avoid overload
+        for page in pdf_reader.pages[:3]:
             text += page.extract_text() or ""
     elif file_type in ["docx", "doc"]:
         doc = Document(uploaded_file)
@@ -63,9 +63,9 @@ def process_file(uploaded_file):
             text += para.text + "\n"
     elif file_type in ["xls", "xlsx"]:
         df = pd.read_excel(uploaded_file)
-        text = df.head(10).to_string()  # show only first 10 rows
+        text = df.head(10).to_string()
     elif file_type == "txt":
-        text = uploaded_file.read().decode("utf-8")[:1000]  # first 1000 chars
+        text = uploaded_file.read().decode("utf-8")[:1000]
     else:
         text = f"⚠️ Unsupported file type: {file_type}"
 
@@ -76,8 +76,8 @@ def process_file(uploaded_file):
 # -------------------
 # Chat Rendering
 # -------------------
-def render_messages():
-    for msg in st.session_state.messages:
+def render_messages(messages):
+    for msg in messages:
         with st.chat_message("user" if msg["role"] == "user" else "assistant"):
             st.markdown(msg["content"])
 
@@ -88,12 +88,15 @@ st.title("🤖 Smart Chatbot")
 
 # Sidebar
 st.sidebar.title("⚙️ Options")
+
+# New Chat
 if st.sidebar.button("🗑️ New Chat"):
     st.session_state.messages = [
         {"role": "assistant", "content": "👋 New chat started. What’s up?"}
     ]
     st.rerun()
 
+# Download
 if st.sidebar.button("💾 Download Chat History"):
     filename = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     st.sidebar.download_button(
@@ -103,10 +106,18 @@ if st.sidebar.button("💾 Download Chat History"):
         mime="application/json",
     )
 
+# 🔍 Search chats
+search_query = st.sidebar.text_input("🔍 Search chat history")
+if search_query:
+    filtered = [m for m in st.session_state.messages if search_query.lower() in m["content"].lower()]
+    st.sidebar.markdown("### Results:")
+    for f in filtered:
+        st.sidebar.write(f"- **{f['role'].capitalize()}**: {f['content'][:50]}...")
+
 # -------------------
 # Display Messages
 # -------------------
-render_messages()
+render_messages(st.session_state.messages)
 
 # -------------------
 # Input Section
@@ -161,7 +172,6 @@ if prompt:
 st.subheader("🎨 Image Generator")
 img_prompt = st.text_input("Describe an image:")
 if st.button("Generate Image") and img_prompt:
-    # Fake image generator (placeholder)
     img = Image.new("RGB", (400, 400), color=(150, 100, 200))
     buf = io.BytesIO()
     img.save(buf, format="PNG")
