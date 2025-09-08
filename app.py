@@ -30,6 +30,9 @@ if "messages" not in st.session_state:
 if "all_chats" not in st.session_state:
     st.session_state.all_chats = load_history()
 
+if "current_chat_index" not in st.session_state:
+    st.session_state.current_chat_index = None
+
 # -------------------- SIDEBAR --------------------
 st.sidebar.header("⚙️ Options")
 
@@ -39,6 +42,7 @@ if st.sidebar.button("➕ New Chat"):
         st.session_state.all_chats.append(st.session_state.messages)
         save_history(st.session_state.all_chats)
     st.session_state.messages = []
+    st.session_state.current_chat_index = None
     st.rerun()
 
 # Search Chats
@@ -49,6 +53,18 @@ if search_query:
         for msg in chat:
             if search_query.lower() in msg["content"].lower():
                 st.sidebar.write(f"📝 Chat {idx+1}: {msg['role'].capitalize()} → {msg['content'][:50]}...")
+
+# View Past Chats
+st.sidebar.subheader("📂 Past Chats")
+if st.session_state.all_chats:
+    chat_options = [f"Chat {i+1}" for i in range(len(st.session_state.all_chats))]
+    selected = st.sidebar.selectbox("Select a chat", ["-- Select --"] + chat_options)
+
+    if selected != "-- Select --":
+        index = int(selected.split(" ")[1]) - 1
+        st.session_state.messages = st.session_state.all_chats[index].copy()
+        st.session_state.current_chat_index = index
+        st.rerun()
 
 # -------------------- MAIN TITLE --------------------
 st.title("🤖 IndiBot")
@@ -82,5 +98,11 @@ if user_input := st.chat_input("Say something..."):
     # Save bot msg
     st.session_state.messages.append({"role": "assistant", "content": bot_reply})
 
-    # Auto-save chat into history
-    save_history(st.session_state.all_chats + [st.session_state.messages])
+    # Update history
+    if st.session_state.current_chat_index is not None:
+        st.session_state.all_chats[st.session_state.current_chat_index] = st.session_state.messages
+    else:
+        if st.session_state.messages not in st.session_state.all_chats:
+            st.session_state.all_chats.append(st.session_state.messages)
+
+    save_history(st.session_state.all_chats)
