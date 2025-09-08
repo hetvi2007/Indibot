@@ -4,6 +4,7 @@ import openai
 # --- Streamlit page config ---
 st.set_page_config(page_title="Smart Chatbot", page_icon="🤖", layout="centered")
 
+# --- Styling ---
 st.markdown("""
     <style>
     .stChatMessage {
@@ -39,9 +40,26 @@ st.markdown("""
 st.title("🤖 Smart Chatbot")
 st.subheader("Talk to an intelligent assistant that responds with purpose.")
 
-# --- Chat history ---
+# --- Initialize session state ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# --- OpenAI Setup ---
+openai.api_key = st.secrets["OPENAI_API_KEY"]  # Securely stored in Streamlit Cloud
+
+def get_gpt_response(prompt):
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",  # or "gpt-4" if available
+            messages=[
+                {"role": "system", "content": "You are a smart and helpful assistant."},
+                *st.session_state.messages,
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"⚠️ Error: {str(e)}"
 
 # --- Chat Display ---
 chat_container = st.container()
@@ -52,15 +70,17 @@ with chat_container:
         st.markdown(f'<div class="stChatMessage {class_name}">{msg["content"]}</div>', unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# --- Input ---
-user_input = st.text_input("Your Message", placeholder="Type something and hit Enter...")
+# --- User Input ---
+user_input = st.text_input("Your Message", placeholder="Ask anything and hit Enter...")
 
-# --- Handle input ---
 if user_input:
+    # Add user input to history
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # Simulate AI response (replace this with OpenAI call)
-    ai_response = f"I'm thinking about: '{user_input}' — how can I help more specifically?"
+    # Get response from GPT
+    ai_reply = get_gpt_response(user_input)
 
-    st.session_state.messages.append({"role": "assistant", "content": ai_response})
+    # Add assistant reply to history
+    st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+
     st.experimental_rerun()
