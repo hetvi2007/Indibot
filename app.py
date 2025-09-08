@@ -1,59 +1,48 @@
 import streamlit as st
 from groq import Groq
-import os
 
-# ---------------- SETUP ----------------
-st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="centered")
+# Load API key securely from Streamlit Secrets
+API_KEY = st.secrets["GROQ_API_KEY"]
 
-# Get API key (either from code or environment variable)
-API_KEY = os.getenv("GROQ_API_KEY", "PASTE-YOUR-GROQ-API-KEY-HERE")
+# Initialize Groq client
+client = Groq(api_key=API_KEY)
 
-# Initialize Groq client safely
-client = None
-if API_KEY and API_KEY != "PASTE-YOUR-GROQ-API-KEY-HERE":
-    try:
-        client = Groq(api_key=API_KEY)
-    except Exception as e:
-        st.error(f"❌ Failed to initialize Groq client: {e}")
-else:
-    st.warning("⚠️ No valid Groq API key found. Please set one to continue.")
-
-# ---------------- HEADER ----------------
+# Streamlit UI
+st.set_page_config(page_title="IndiBot", page_icon="🤖")
 st.title("🤖 IndiBot")
-st.write("A smart chatbot built with **Streamlit** and **Groq**.")
+st.write("A simple chatbot built with Streamlit and Groq.")
 
-# ---------------- CHAT HISTORY ----------------
+# Initialize chat history
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [
-        {"role": "system", "content": "You are IndiBot, a friendly assistant."}
-    ]
+    st.session_state.messages = []
 
-# ---------------- USER INPUT ----------------
-user_input = st.chat_input("Say something...")
+# Display chat history
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-if user_input and client:
-    # Save user message
-    st.session_state["messages"].append({"role": "user", "content": user_input})
+# Input box
+if prompt := st.chat_input("Say something..."):
+    # Add user message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-    try:
-        # Call Groq model
-        response = client.chat.completions.create(
-            model="mixtral-8x7b-32768",  # or "llama2-70b-4096"
-            messages=st.session_state["messages"]
-        )
+    # Get response from Groq
+    with st.chat_message("assistant"):
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.1-8b-instant",  # or other Groq-supported model
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages
+                ]
+            )
+            reply = response.choices[0].message.content
+            st.markdown(reply)
+        except Exception as e:
+            reply = "⚠️ Error: " + str(e)
+            st.markdown(reply)
 
-        # Get bot reply
-        bot_reply = response.choices[0].message.content
-
-        # Save bot reply
-        st.session_state["messages"].append({"role": "assistant", "content": bot_reply})
-
-    except Exception as e:
-        st.error(f"⚠️ Error while calling Groq API: {e}")
-
-# ---------------- DISPLAY CHAT ----------------
-for msg in st.session_state["messages"][1:]:  # skip system message
-    if msg["role"] == "user":
-        st.markdown(f"🧑 **You:** {msg['content']}")
-    elif msg["role"] == "assistant":
-        st.markdown(f"🤖 **IndiBot:** {msg['content']}")
+    # Save assistant reply
+    st.session_state.messages.append({"role": "assistant", "content": reply})
