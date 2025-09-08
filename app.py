@@ -76,7 +76,7 @@ if user_input:
     add_message("user", user_input)
     bot_reply = chatbot_reply(user_input)
     add_message("assistant", bot_reply)
-    st.experimental_rerun()
+    st.rerun()  # ✅ replaced experimental_rerun with rerun()
 
 # ---------------- File Upload ----------------
 st.subheader("📂 Upload a file")
