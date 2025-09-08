@@ -4,7 +4,7 @@ from groq import Groq
 
 # ——— Page config ———
 st.set_page_config(
-    page_title="AI Assistant",
+    page_title="Mehnitavi (Groq-powered)",
     page_icon="🤖",
     layout="wide"
 )
@@ -21,11 +21,11 @@ client = Groq(api_key=groq_key)
 # ——— Session state ———
 if "messages" not in st.session_state or not isinstance(st.session_state.messages, list):
     st.session_state.messages = [
-        {"role": "assistant", "content": "👋 Hi, I’m AI Assistant! Ask me anything."}
+        {"role": "assistant", "content": "👋 Hi, I’m Mehnitavi (Groq)! Ask me anything."}
     ]
 
 # ——— UI ———
-st.title("🤖 AI Assistant")
+st.title("🤖 Mehnitavi — Groq Cloud Chatbot")
 
 for msg in st.session_state.messages:
     with st.chat_message(msg.get("role", "assistant")):
@@ -47,9 +47,9 @@ if prompt:
         if response and hasattr(response, "choices") and len(response.choices) > 0:
             reply = response.choices[0].message.content
         else:
-            reply = "❌ AI returned an empty response."
+            reply = "❌ Groq returned an empty response."
     except Exception as e:
-        reply = f"❌ Failed to get response from AI API: {str(e)}"
+        reply = f"❌ Failed to get response from Groq API: {str(e)}"
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
     st.rerun()
