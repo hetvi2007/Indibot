@@ -1,65 +1,49 @@
 import os
 import streamlit as st
-from openai import OpenAI
+from groq import Groq
 
-# -------------------
-# Page Config
-# -------------------
+# ——— Page config ———
 st.set_page_config(
-    page_title="Mehnitavi",
+    page_title="Mehnitavi (Groq-powered)",
     page_icon="🤖",
     layout="wide"
 )
 
-# -------------------
-# OpenAI Setup (safe)
-# -------------------
-api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-if not api_key:
-    st.error("❌ No OpenAI API key found. Please set it in `.streamlit/secrets.toml` or environment variables.")
+# ——— Groq API setup ———
+groq_key = (
+    st.secrets.get("GROQ_API_KEY") or
+    os.getenv("GROQ_API_KEY")
+)
+if not groq_key:
+    st.error(
+        "❌ No Groq API key detected. "
+        "Add it in .streamlit/secrets.toml or via environment variable."
+    )
     st.stop()
 
-client = OpenAI(api_key=api_key)
+client = Groq(api_key=groq_key)
 
-# -------------------
-# Session State Setup
-# -------------------
+# ——— Session state ———
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "👋 Hello! I’m Mehnitavi, your AI assistant. How can I help you today?"}
+        {"role": "assistant", "content": "👋 Hi, I’m Mehnitavi (Groq)! Ask me anything."}
     ]
 
-# -------------------
-# Chat Rendering
-# -------------------
-def render_messages():
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+# ——— UI ———
+st.title("🤖 Mehnitavi — Groq Cloud Chatbot")
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-st.title("🤖 Mehnitavi - AI Chatbot")
-
-# Show past messages
-render_messages()
-
-# -------------------
-# Chat Input
-# -------------------
+# Chat input using ChatGPT style
 prompt = st.chat_input("Type your message...")
 
 if prompt:
-    # Save user message
     st.session_state.messages.append({"role": "user", "content": prompt})
-
-    # Query OpenAI
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="llama-3.3-70b-versatile",
         messages=st.session_state.messages
     )
-
     reply = response.choices[0].message.content
-
-    # Save assistant message
     st.session_state.messages.append({"role": "assistant", "content": reply})
-
     st.rerun()
