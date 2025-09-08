@@ -1,2 +1,4 @@
 streamlit
 pyperclip
+python-docx
+PyPDF2
