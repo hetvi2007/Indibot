@@ -42,7 +42,7 @@ if theme_choice == "Dark":
 # -------------------
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "👋 Hello — I’m Smart Chatbot. Ask me anything or upload a file to summarize."}
+        {"role": "assistant", "content": "👋 Hello — I'm Smart Chatbot. Ask me anything or upload a file to summarize."}
     ]
 
 # -------------------
@@ -92,7 +92,7 @@ st.sidebar.title("⚙️ Options")
 # New Chat
 if st.sidebar.button("🗑️ New Chat"):
     st.session_state.messages = [
-        {"role": "assistant", "content": "👋 New chat started. What’s up?"}
+        {"role": "assistant", "content": "👋 New chat started. What's up?"}
     ]
     st.rerun()
 
@@ -161,7 +161,7 @@ if prompt:
         if "hello" in prompt.lower() or "hi" in prompt.lower():
             reply = "👋 Hi there! How can I help you?"
         else:
-            reply = f"🤔 I don’t know that yet, but I can learn! You asked: {prompt}"
+            reply = f"🤔 I don't know that yet, but I can learn! You asked: {prompt}"
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
     st.rerun()
@@ -176,4 +176,4 @@ if st.button("Generate Image") and img_prompt:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
-    st.image(buf, caption=f"Generated: {img_prompt}", use_column_width=True)
+    st.image(buf, caption=f"Generated: {img_prompt}", use_container_width=True)  # Fixed line
