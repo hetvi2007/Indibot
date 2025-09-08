@@ -26,7 +26,7 @@ client = Groq(api_key=groq_key)
 # ——— Session state ———
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "👋 Hi, I’m Mehnitavi (Groq)! Ask me anything."}
+        {"role": "assistant", "content": "👋 Hi, I’m Mehnitavi! Ask me anything."}
     ]
 
 # ——— UI ———
