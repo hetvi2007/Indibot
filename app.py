@@ -1,83 +1,44 @@
 import streamlit as st
-import openai
-import json
-import os
-import datetime
+from groq import Groq
 
-# ✅ New OpenAI client (v1.0+)
-from openai import OpenAI
+# ---------------- SETUP ----------------
+st.set_page_config(page_title="IndiBot", page_icon="🤖", layout="centered")
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# 🔑 Paste your Groq API key here
+client = Groq(api_key="PASTE-YOUR-GROQ-API-KEY-HERE")
 
-# ✅ Page config
-st.set_page_config(page_title="🤖 Smart Python Chatbot", layout="centered")
-st.title("🤖 Smart Python Chatbot")
-st.markdown("Chat with a smart assistant that remembers, stores, and adapts!")
+# ---------------- HEADER ----------------
+st.title("🤖 IndiBot")
+st.write("A smart chatbot built with **Streamlit** and **Groq**.")
 
-# ✅ Persona selector
-persona = st.selectbox("🧱 Choose Assistant Persona", [
-    "Helpful Assistant",
-    "Motivational Coach",
-    "Tech Expert",
-    "Comedian 🤡",
-])
-
-# ✅ Set system prompt
+# ---------------- CHAT HISTORY ----------------
 if "messages" not in st.session_state:
-    system_msg = {
-        "Helpful Assistant": "You are a helpful assistant.",
-        "Motivational Coach": "You are a positive coach who inspires users.",
-        "Tech Expert": "You are a Python coding assistant. Explain and fix code clearly.",
-        "Comedian 🤡": "You are a funny chatbot who replies with jokes and humor.",
-    }[persona]
-    st.session_state.messages = [{"role": "system", "content": system_msg}]
+    st.session_state["messages"] = [
+        {"role": "system", "content": "You are IndiBot, a helpful assistant."}
+    ]
 
-# ✅ Display chat history
-for msg in st.session_state.messages[1:]:
+# ---------------- USER INPUT ----------------
+user_input = st.chat_input("Say something...")
+
+if user_input:
+    # Save user message
+    st.session_state["messages"].append({"role": "user", "content": user_input})
+
+    # Call Groq model (example: mixtral-8x7b-32768)
+    response = client.chat.completions.create(
+        model="mixtral-8x7b-32768",  # or "llama2-70b-4096"
+        messages=st.session_state["messages"]
+    )
+
+    # Get bot reply
+    bot_reply = response.choices[0].message.content
+
+    # Save bot reply
+    st.session_state["messages"].append({"role": "assistant", "content": bot_reply})
+
+# ---------------- DISPLAY CHAT ----------------
+for msg in st.session_state["messages"][1:]:  # skip system message
     if msg["role"] == "user":
         st.markdown(f"🧑 **You:** {msg['content']}")
-    else:
-        st.markdown(f"🤖 **Bot:** {msg['content']}")
-
-# ✅ User input
-user_input = st.text_input("💬 Type your message here:", key="input")
-
-# ✅ Handle input and response
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    with st.spinner("🤖 Thinking..."):
-        try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=st.session_state.messages,
-                temperature=0.7,
-                max_tokens=500,
-            )
-            reply = response.choices[0].message.content
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-            st.experimental_rerun()
-        except Exception as e:
-            st.error(f"❌ Error: {e}")
-
-# ✅ Download chat
-if st.button("💾 Download Chat (.txt & .json)"):
-    history = st.session_state.messages[1:]
-    chat_text = "\n".join(
-        f"You: {m['content']}" if m["role"] == "user" else f"Bot: {m['content']}" for m in history
-    )
-    st.download_button("📄 TXT", chat_text, "chat.txt")
-    st.download_button("🧾 JSON", json.dumps(history, indent=2), "chat.json")
-
-# ✅ Save to local file
-def save_chat_to_file():
-    folder = "chat_logs"
-    os.makedirs(folder, exist_ok=True)
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = os.path.join(folder, f"chat_{timestamp}.json")
-    with open(filepath, "w") as f:
-        json.dump(st.session_state.messages, f, indent=2)
-
-if st.button("🧠 Save Chat to Local File"):
-    save_chat_to_file()
-    st.success("Chat saved locally!")
+    elif msg["role"] == "assistant":
+        st.markdown(f"🤖 **IndiBot:** {msg['content']}")
