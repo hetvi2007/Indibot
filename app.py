@@ -1,6 +1,7 @@
 import os
 import streamlit as st
 from groq import Groq
+import pyperclip
 
 # ——— Page config ———
 st.set_page_config(
