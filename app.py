@@ -1,7 +1,6 @@
-import os
+code working 03.09.2025                                                                                             import os
 import streamlit as st
 from groq import Groq
-import pyperclip
 
 # ——— Page config ———
 st.set_page_config(
@@ -31,7 +30,7 @@ if "messages" not in st.session_state:
     ]
 
 # ——— UI ———
-st.title("🤖 Mehnitavi — Groq Cloud Chatbot")
+st.title("🤖 Mehnitavi — AI ASSITANT ")
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
