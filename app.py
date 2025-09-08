@@ -1,52 +1,40 @@
 import streamlit as st
-import os
-import json
-from datetime import datetime
-from groq import Groq
 from PyPDF2 import PdfReader
 from docx import Document
 import pandas as pd
+from PIL import Image
+import io
+import json
+from datetime import datetime
 
 # -------------------
 # Page Config
 # -------------------
-st.set_page_config(
-    page_title="Mehnitavi",
-    page_icon="🤖",
-    layout="wide"
-)
+st.set_page_config(page_title="🤖 Smart Chatbot", layout="wide")
 
 # -------------------
-# Groq API Client
+# Theme (Dark/Light)
 # -------------------
-GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-client = Groq(api_key=GROQ_API_KEY)
+if "theme" not in st.session_state:
+    st.session_state.theme = "Light"
 
-# -------------------
-# Sidebar
-# -------------------
-st.sidebar.markdown("### ⚙️ Options")
-st.sidebar.write("Mehnitavi AI Assistant")
+theme_choice = st.sidebar.radio("🌗 Theme", ["Light", "Dark"])
+st.session_state.theme = theme_choice
 
-# Theme Selector
-theme = st.sidebar.radio("Theme", ["Light", "Dark"])
-
-# Apply Dark Mode via CSS
-if theme == "Dark":
+if theme_choice == "Dark":
     st.markdown(
         """
         <style>
         body, .stApp {
-            background-color: #1e1e1e;
-            color: white;
+            background-color: #1E1E1E;
+            color: white !important;
         }
-        .stTextInput, .stTextArea, .stChatInput {
-            background-color: #2b2b2b;
-            color: white;
+        .stMarkdown, .stTextInput, .stChatMessage {
+            color: white !important;
         }
         </style>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
 # -------------------
@@ -54,98 +42,128 @@ if theme == "Dark":
 # -------------------
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "👋 Hello — I’m Mehnitavi. Ask me anything or upload files for me to read."}
+        {"role": "assistant", "content": "👋 Hello — I’m Smart Chatbot. Ask me anything or upload a file to summarize."}
     ]
-if "edit_mode" not in st.session_state:
-    st.session_state.edit_mode = {}
 
 # -------------------
 # File Processing
 # -------------------
 def process_file(uploaded_file):
-    """Extract text from PDF, Word, Excel, or TXT files."""
+    """Extract and summarize text from PDF, Word, Excel, or TXT files."""
     text = ""
     file_type = uploaded_file.name.split(".")[-1].lower()
 
     if file_type == "pdf":
         pdf_reader = PdfReader(uploaded_file)
-        for page in pdf_reader.pages:
+        for page in pdf_reader.pages[:3]:  # limit to 3 pages to avoid overload
             text += page.extract_text() or ""
     elif file_type in ["docx", "doc"]:
         doc = Document(uploaded_file)
-        for para in doc.paragraphs:
+        for para in doc.paragraphs[:20]:
             text += para.text + "\n"
     elif file_type in ["xls", "xlsx"]:
         df = pd.read_excel(uploaded_file)
-        text = df.to_string()
+        text = df.head(10).to_string()  # show only first 10 rows
     elif file_type == "txt":
-        text = uploaded_file.read().decode("utf-8")
+        text = uploaded_file.read().decode("utf-8")[:1000]  # first 1000 chars
     else:
         text = f"⚠️ Unsupported file type: {file_type}"
 
+    if len(text) > 800:
+        text = text[:800] + "... (summary truncated)"
     return text
 
 # -------------------
 # Chat Rendering
 # -------------------
 def render_messages():
-    for i, msg in enumerate(st.session_state.messages):
-        is_user = msg["role"] == "user"
-        with st.chat_message("user" if is_user else "assistant"):
-            if st.session_state.edit_mode.get(i, False) and is_user:
-                new_text = st.text_area("Edit your message:", msg["content"], key=f"edit_box_{i}")
-                if st.button("Save", key=f"save_btn_{i}"):
-                    st.session_state.messages[i]["content"] = new_text
-                    st.session_state.edit_mode[i] = False
-                    st.rerun()
-                if st.button("Cancel", key=f"cancel_btn_{i}"):
-                    st.session_state.edit_mode[i] = False
-                    st.rerun()
-            else:
-                st.markdown(msg["content"])
-                if is_user:  # edit button only for user messages
-                    if st.button("✏️ Edit", key=f"edit_btn_{i}"):
-                        st.session_state.edit_mode[i] = True
-                        st.rerun()
+    for msg in st.session_state.messages:
+        with st.chat_message("user" if msg["role"] == "user" else "assistant"):
+            st.markdown(msg["content"])
 
 # -------------------
 # Main App Layout
 # -------------------
-st.title("🤖 Mehnitavi - AI Chatbot")
+st.title("🤖 Smart Chatbot")
 
-# Render previous messages
+# Sidebar
+st.sidebar.title("⚙️ Options")
+if st.sidebar.button("🗑️ New Chat"):
+    st.session_state.messages = [
+        {"role": "assistant", "content": "👋 New chat started. What’s up?"}
+    ]
+    st.rerun()
+
+if st.sidebar.button("💾 Download Chat History"):
+    filename = f"chat_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    st.sidebar.download_button(
+        "Download",
+        data=json.dumps(st.session_state.messages, indent=2),
+        file_name=filename,
+        mime="application/json",
+    )
+
+# -------------------
+# Display Messages
+# -------------------
 render_messages()
 
-# Chat input with file upload option
-col1, col2 = st.columns([0.15, 0.85])
+# -------------------
+# Input Section
+# -------------------
+col1, col2 = st.columns([0.2, 0.8])
 with col1:
-    uploaded_file = st.file_uploader("", type=["pdf", "docx", "doc", "xlsx", "xls", "txt"], label_visibility="collapsed")
+    uploaded_file = st.file_uploader("📂", type=["pdf", "docx", "doc", "xlsx", "xls", "txt"], label_visibility="collapsed")
 with col2:
     prompt = st.chat_input("Type your message...")
 
 # -------------------
-# Handle Uploaded File
+# Handle File Upload
 # -------------------
 if uploaded_file:
     file_text = process_file(uploaded_file)
-    st.session_state.messages.append({"role": "user", "content": f"📄 Uploaded file: {uploaded_file.name}"})
-    st.session_state.messages.append({"role": "assistant", "content": f"Here’s the extracted content:\n\n{file_text}"})
+    st.session_state.messages.append({"role": "user", "content": f"📄 Uploaded: {uploaded_file.name}"})
+    st.session_state.messages.append({"role": "assistant", "content": f"📑 File Summary:\n\n{file_text}"})
     st.rerun()
 
 # -------------------
-# Handle Text Input (Groq AI Integration)
+# Handle Chat Input
 # -------------------
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
 
-    try:
-        completion = client.chat.completions.create(
-            model="llama-3.1-70b-versatile",  # ✅ Updated model
-            messages=[{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
-        )
-        reply = completion.choices[0].message["content"]
-    except Exception as e:
-        reply = f"❌ Error: {e}"
+    knowledge_base = {
+        "python": "🐍 Python is great for AI, data science, and web apps.",
+        "java": "☕ Java is widely used in enterprise software and Android apps.",
+        "history": "📜 History tells us about past civilizations and events.",
+        "science": "🔬 Science helps us explore and understand the world.",
+        "ai": "🤖 AI means machines can think and learn like humans."
+    }
+
+    reply = None
+    for keyword, answer in knowledge_base.items():
+        if keyword in prompt.lower():
+            reply = answer
+            break
+
+    if not reply:
+        if "hello" in prompt.lower() or "hi" in prompt.lower():
+            reply = "👋 Hi there! How can I help you?"
+        else:
+            reply = f"🤔 I don’t know that yet, but I can learn! You asked: {prompt}"
 
     st.session_state.messages.append({"role": "assistant", "content": reply})
     st.rerun()
+
+# -------------------
+# Image Generator
+# -------------------
+st.subheader("🎨 Image Generator")
+img_prompt = st.text_input("Describe an image:")
+if st.button("Generate Image") and img_prompt:
+    # Fake image generator (placeholder)
+    img = Image.new("RGB", (400, 400), color=(150, 100, 200))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    st.image(buf, caption=f"Generated: {img_prompt}", use_column_width=True)
